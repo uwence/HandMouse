@@ -12,22 +12,15 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-3. Install dependencies:
+3. Install the project and development dependencies:
 
 ```powershell
-python -m pip install -r requirements.txt
+python -m pip install -e ".[dev]"
 ```
 
 ## Run
 
 ```powershell
-python -m handmouse.app
-```
-
-If running from a fresh checkout, set `PYTHONPATH` to the local `src` directory first:
-
-```powershell
-$env:PYTHONPATH = ".\src"
 python -m handmouse.app
 ```
 
