@@ -39,7 +39,9 @@ $env:HANDMOUSE_MODEL_PATH = "C:\path\to\hand_landmarker.task"
 
 ## Mouse Behavior
 
-HandMouse uses relative movement by default. When real mouse-control mode is enabled, moving your index finger moves the cursor by a matching relative delta, similar to a physical mouse or touchpad. The first detected frame anchors the hand position and does not move the cursor, so re-entering the frame should not cause a large jump.
+HandMouse uses a virtual touchpad model by default. The debug window shows an inset control rectangle. When real mouse-control mode is enabled, moving your index finger inside that rectangle moves the cursor by a matching relative delta, similar to a physical mouse or touchpad.
+
+The first detected frame inside the rectangle anchors the hand position and does not move the cursor. Moving outside the rectangle resets the anchor, like lifting your finger from a touchpad, so re-entering the rectangle should not cause a large jump.
 
 Thumb-index pinch still triggers left click. During pinch/click/cooldown, movement is paused and the relative anchor is reset so releasing the gesture does not drag the cursor back.
 

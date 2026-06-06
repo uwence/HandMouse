@@ -138,6 +138,10 @@ class RelativePointerMapper:
             self.reset()
             return None
 
+        if not self._is_inside_control_region(point):
+            self.reset()
+            return None
+
         normalized_x, normalized_y = self._normalize(point)
         self._last_frame_point = self._control_region_point(normalized_x, normalized_y)
 
@@ -170,11 +174,16 @@ class RelativePointerMapper:
 
     def _normalize(self, point: FramePoint) -> tuple[float, float]:
         region = self.config.control_region
-        clamped_x = min(max(point.x, region.left), region.right)
-        clamped_y = min(max(point.y, region.top), region.bottom)
         return (
-            (clamped_x - region.left) / (region.right - region.left),
-            (clamped_y - region.top) / (region.bottom - region.top),
+            (point.x - region.left) / (region.right - region.left),
+            (point.y - region.top) / (region.bottom - region.top),
+        )
+
+    def _is_inside_control_region(self, point: FramePoint) -> bool:
+        region = self.config.control_region
+        return (
+            region.left <= point.x <= region.right
+            and region.top <= point.y <= region.bottom
         )
 
     def _control_region_point(self, normalized_x: float, normalized_y: float) -> FramePoint:

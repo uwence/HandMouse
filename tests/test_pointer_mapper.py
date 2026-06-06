@@ -159,3 +159,28 @@ def test_relative_mapper_reset_prevents_reentry_jump() -> None:
     assert mapper.update(FramePoint(0.25, 0.25)) is None
     assert mapper.update(None) is None
     assert mapper.update(FramePoint(0.75, 0.75)) is None
+
+
+def test_relative_mapper_ignores_points_outside_touchpad_region() -> None:
+    mapper = make_relative_mapper()
+
+    assert mapper.update(FramePoint(0.5, 0.5)) is None
+    assert mapper.update(FramePoint(0.1, 0.5)) is None
+    assert mapper.last_frame_point is None
+
+
+def test_relative_mapper_reentry_after_leaving_region_does_not_jump() -> None:
+    mapper = make_relative_mapper()
+
+    assert mapper.update(FramePoint(0.5, 0.5)) is None
+    assert mapper.update(FramePoint(0.6, 0.5)) == ScreenDelta(20, 0)
+    assert mapper.update(FramePoint(0.1, 0.5)) is None
+    assert mapper.update(FramePoint(0.75, 0.75)) is None
+
+
+def test_relative_mapper_moves_again_after_reentry_anchor() -> None:
+    mapper = make_relative_mapper()
+
+    assert mapper.update(FramePoint(0.1, 0.5)) is None
+    assert mapper.update(FramePoint(0.5, 0.5)) is None
+    assert mapper.update(FramePoint(0.55, 0.5)) == ScreenDelta(10, 0)
