@@ -24,6 +24,14 @@ python -m pip install -e ".[dev]"
 python -m handmouse.app
 ```
 
+On first run, HandMouse downloads the MediaPipe hand landmarker model to
+`%USERPROFILE%\.handmouse\models\hand_landmarker.task`. To use a pre-downloaded
+model file instead, set:
+
+```powershell
+$env:HANDMOUSE_MODEL_PATH = "C:\path\to\hand_landmarker.task"
+```
+
 ## Controls
 
 - `m`: toggle between debug mode and real mouse-control mode.
