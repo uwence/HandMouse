@@ -68,6 +68,7 @@ def _run_loop(
                 "permissions, close other apps using the camera, or change the "
                 "camera index in DEFAULT_CONFIG."
             )
+        frame = _mirror_frame(cv2, frame)
 
         now = time.perf_counter()
         fps = _fps(previous_frame_time, now)
@@ -113,6 +114,10 @@ def _fps(previous_time: float, now: float) -> float:
     if elapsed <= 0:
         return 0.0
     return 1.0 / elapsed
+
+
+def _mirror_frame(cv2: Any, frame: Any) -> Any:
+    return cv2.flip(frame, 1)
 
 
 def _load_cv2() -> Any:
