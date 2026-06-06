@@ -162,6 +162,10 @@ class DebugView:
         if point is None:
             return
 
+        if isinstance(point, ScreenPoint):
+            _draw_screen_point_text(cv2, frame, point, height)
+            return
+
         pixel = _point_to_pixel(point, width, height)
         if pixel is None:
             return
@@ -299,6 +303,31 @@ def _point_to_pixel(point: Any, width: int, height: int) -> tuple[int, int] | No
     return (
         _clamp_int(round(x_float), 0, width - 1),
         _clamp_int(round(y_float), 0, height - 1),
+    )
+
+
+def _draw_screen_point_text(cv2: Any, frame: Any, point: ScreenPoint, height: int) -> None:
+    text = f"target screen: {point.x}, {point.y}"
+    origin = (14, max(24, height - 16))
+    cv2.putText(
+        frame,
+        text,
+        origin,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (0, 0, 0),
+        3,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame,
+        text,
+        origin,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (255, 80, 255),
+        1,
+        cv2.LINE_AA,
     )
 
 
