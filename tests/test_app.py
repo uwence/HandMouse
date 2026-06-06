@@ -25,7 +25,7 @@ class FailsafeMouse:
     def __init__(self) -> None:
         self.enabled = True
 
-    def move(self, pointer_result: object) -> None:
+    def move_relative(self, pointer_result: object) -> None:
         raise MouseFailsafeTriggered("corner")
 
     def left_click(self) -> None:

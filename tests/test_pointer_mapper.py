@@ -1,5 +1,6 @@
 from handmouse.config import DEFAULT_CONFIG, ControlRegion, PointerConfig
 from handmouse.pointer_mapper import FramePoint, PointerMapper, ScreenPoint
+from handmouse.pointer_mapper import RelativePointerMapper, ScreenDelta
 
 
 def make_mapper(
@@ -17,6 +18,26 @@ def make_mapper(
             smoothing=smoothing,
             dead_zone_px=dead_zone_px,
             control_region=control_region,
+        ),
+    )
+
+
+def make_relative_mapper(
+    *,
+    dead_zone_px: float = 0.0,
+    relative_sensitivity: float = 1.0,
+    screen_width: int = 100,
+    screen_height: int = 100,
+    control_region: ControlRegion = ControlRegion(left=0.25, top=0.25, right=0.75, bottom=0.75),
+) -> RelativePointerMapper:
+    return RelativePointerMapper(
+        screen_width=screen_width,
+        screen_height=screen_height,
+        config=PointerConfig(
+            smoothing=0.5,
+            dead_zone_px=dead_zone_px,
+            control_region=control_region,
+            relative_sensitivity=relative_sensitivity,
         ),
     )
 
@@ -102,3 +123,39 @@ def test_last_frame_point_tracks_smoothed_target_inside_control_region() -> None
 
     mapper.update(FramePoint(0.9, 0.8))
     assert mapper.last_frame_point == FramePoint(0.5, 0.5)
+
+
+def test_relative_mapper_first_point_anchors_without_moving() -> None:
+    mapper = make_relative_mapper()
+
+    assert mapper.update(FramePoint(0.5, 0.5)) is None
+    assert mapper.last_frame_point == FramePoint(0.5, 0.5)
+
+
+def test_relative_mapper_outputs_directional_delta() -> None:
+    mapper = make_relative_mapper()
+
+    assert mapper.update(FramePoint(0.5, 0.5)) is None
+    assert mapper.update(FramePoint(0.55, 0.45)) == ScreenDelta(10, -10)
+
+
+def test_relative_mapper_applies_sensitivity() -> None:
+    mapper = make_relative_mapper(relative_sensitivity=2.0)
+
+    assert mapper.update(FramePoint(0.5, 0.5)) is None
+    assert mapper.update(FramePoint(0.55, 0.5)) == ScreenDelta(20, 0)
+
+
+def test_relative_mapper_dead_zone_suppresses_jitter() -> None:
+    mapper = make_relative_mapper(dead_zone_px=12.0)
+
+    assert mapper.update(FramePoint(0.5, 0.5)) is None
+    assert mapper.update(FramePoint(0.52, 0.5)) is None
+
+
+def test_relative_mapper_reset_prevents_reentry_jump() -> None:
+    mapper = make_relative_mapper()
+
+    assert mapper.update(FramePoint(0.25, 0.25)) is None
+    assert mapper.update(None) is None
+    assert mapper.update(FramePoint(0.75, 0.75)) is None

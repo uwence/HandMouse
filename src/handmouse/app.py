@@ -6,10 +6,10 @@ from typing import Any
 from handmouse.camera import Camera
 from handmouse.config import DEFAULT_CONFIG
 from handmouse.debug_view import DebugView
-from handmouse.gesture_detector import GestureDetector
+from handmouse.gesture_detector import GestureDetector, GestureState
 from handmouse.hand_tracker import HandTracker
 from handmouse.mouse_controller import MouseController, MouseFailsafeTriggered
-from handmouse.pointer_mapper import PointerMapper
+from handmouse.pointer_mapper import RelativePointerMapper
 
 
 WINDOW_NAME = "HandMouse"
@@ -27,7 +27,7 @@ def main() -> None:
     try:
         camera.open()
         tracker = _create_tracker()
-        mapper = PointerMapper(screen_width, screen_height, config.pointer)
+        mapper = RelativePointerMapper(screen_width, screen_height, config.pointer)
         detector = GestureDetector(config.gesture)
         debug_view = DebugView(config)
 
@@ -53,7 +53,7 @@ def _run_loop(
     cv2: Any,
     camera: Camera,
     tracker: HandTracker,
-    mapper: PointerMapper,
+    mapper: RelativePointerMapper,
     detector: GestureDetector,
     mouse: MouseController,
     debug_view: DebugView,
@@ -75,15 +75,20 @@ def _run_loop(
         previous_frame_time = now
 
         hand_result = tracker.process(frame)
-        pointer_result = mapper.update(hand_result.index_tip)
         gesture_result = detector.update(
             hand_result.thumb_tip,
             hand_result.index_tip,
             int(now * 1000),
         )
+        movement_point = (
+            hand_result.index_tip
+            if gesture_result.state == GestureState.MOVING
+            else None
+        )
+        pointer_delta = mapper.update(movement_point)
 
         if mouse.is_control_enabled():
-            _apply_mouse_control(mouse, pointer_result, gesture_result.should_click)
+            _apply_mouse_control(mouse, pointer_delta, gesture_result.should_click)
 
         debug_frame = debug_view.draw(
             frame,
@@ -124,7 +129,7 @@ def _apply_mouse_control(
     should_click: bool,
 ) -> None:
     try:
-        mouse.move(pointer_result)
+        mouse.move_relative(pointer_result)
         if should_click:
             mouse.left_click()
     except MouseFailsafeTriggered:

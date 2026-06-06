@@ -23,6 +23,7 @@ class PointerConfig:
     smoothing: float
     dead_zone_px: float
     control_region: ControlRegion
+    relative_sensitivity: float = 1.4
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ DEFAULT_CONFIG = AppConfig(
         smoothing=0.35,
         dead_zone_px=4.0,
         control_region=ControlRegion(left=0.12, top=0.10, right=0.88, bottom=0.90),
+        relative_sensitivity=1.4,
     ),
     gesture=GestureConfig(
         pinch_threshold=0.05,

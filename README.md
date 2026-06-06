@@ -37,6 +37,12 @@ $env:HANDMOUSE_MODEL_PATH = "C:\path\to\hand_landmarker.task"
 - `m`: toggle between debug mode and real mouse-control mode.
 - `q`: quit the application.
 
+## Mouse Behavior
+
+HandMouse uses relative movement by default. When real mouse-control mode is enabled, moving your index finger moves the cursor by a matching relative delta, similar to a physical mouse or touchpad. The first detected frame anchors the hand position and does not move the cursor, so re-entering the frame should not cause a large jump.
+
+Thumb-index pinch still triggers left click. During pinch/click/cooldown, movement is paused and the relative anchor is reset so releasing the gesture does not drag the cursor back.
+
 ## Safety
 
 The app starts in debug mode, so hand tracking and cursor targets can be inspected before real mouse movement is enabled. PyAutoGUI failsafe stays enabled, allowing the real mouse to be moved to a screen corner to abort if control becomes unstable.

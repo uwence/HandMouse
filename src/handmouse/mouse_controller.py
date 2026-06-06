@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from handmouse.pointer_mapper import ScreenPoint
+from handmouse.pointer_mapper import ScreenDelta, ScreenPoint
 
 
 try:
@@ -34,6 +34,20 @@ class MouseController:
         backend = self._backend()
         try:
             backend.moveTo(point.x, point.y, duration=0)
+        except Exception as exc:
+            if self._is_failsafe_exception(exc):
+                raise MouseFailsafeTriggered(
+                    "PyAutoGUI failsafe triggered; disabling real mouse control."
+                ) from exc
+            raise
+
+    def move_relative(self, delta: ScreenDelta | None) -> None:
+        if not self._control_enabled or delta is None:
+            return
+
+        backend = self._backend()
+        try:
+            backend.moveRel(delta.dx, delta.dy, duration=0)
         except Exception as exc:
             if self._is_failsafe_exception(exc):
                 raise MouseFailsafeTriggered(
