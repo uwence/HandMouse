@@ -45,7 +45,7 @@ class PointerMapper:
             smoothed_x = target_x
             smoothed_y = target_y
         else:
-            smoothing = self.config.smoothing
+            smoothing = self._clamp(self.config.smoothing, 0.0, 1.0)
             smoothed_x = self._previous_x + smoothing * (target_x - self._previous_x)
             smoothed_y = self._previous_y + smoothing * (target_y - self._previous_y)
 
@@ -86,6 +86,10 @@ class PointerMapper:
             output.y - self._previous_output.y,
         )
         return distance < self.config.dead_zone_px
+
+    @staticmethod
+    def _clamp(value: float, lower: float, upper: float) -> float:
+        return max(lower, min(upper, value))
 
 
 __all__ = ["FramePoint", "PointerMapper", "ScreenPoint"]
