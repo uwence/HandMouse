@@ -13,6 +13,10 @@ else:
     pyautogui.FAILSAFE = True
 
 
+class MouseFailsafeTriggered(RuntimeError):
+    """Raised when PyAutoGUI aborts because the pointer is in a screen corner."""
+
+
 class MouseController:
     def __init__(self) -> None:
         self._control_enabled = False
@@ -28,14 +32,28 @@ class MouseController:
             return
 
         backend = self._backend()
-        backend.moveTo(point.x, point.y, duration=0)
+        try:
+            backend.moveTo(point.x, point.y, duration=0)
+        except Exception as exc:
+            if self._is_failsafe_exception(exc):
+                raise MouseFailsafeTriggered(
+                    "PyAutoGUI failsafe triggered; disabling real mouse control."
+                ) from exc
+            raise
 
     def left_click(self) -> None:
         if not self._control_enabled:
             return
 
         backend = self._backend()
-        backend.click(button="left")
+        try:
+            backend.click(button="left")
+        except Exception as exc:
+            if self._is_failsafe_exception(exc):
+                raise MouseFailsafeTriggered(
+                    "PyAutoGUI failsafe triggered; disabling real mouse control."
+                ) from exc
+            raise
 
     def _backend(self) -> Any:
         if pyautogui is None:
@@ -43,3 +61,15 @@ class MouseController:
 
         pyautogui.FAILSAFE = True
         return pyautogui
+
+    @staticmethod
+    def _is_failsafe_exception(exc: Exception) -> bool:
+        if pyautogui is not None:
+            failsafe_type = getattr(pyautogui, "FailSafeException", None)
+            if failsafe_type is not None and isinstance(exc, failsafe_type):
+                return True
+
+        return exc.__class__.__name__ == "FailSafeException"
+
+
+__all__ = ["MouseController", "MouseFailsafeTriggered"]

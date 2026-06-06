@@ -8,7 +8,7 @@ from handmouse.config import DEFAULT_CONFIG
 from handmouse.debug_view import DebugView
 from handmouse.gesture_detector import GestureDetector
 from handmouse.hand_tracker import HandTracker
-from handmouse.mouse_controller import MouseController
+from handmouse.mouse_controller import MouseController, MouseFailsafeTriggered
 from handmouse.pointer_mapper import PointerMapper
 
 
@@ -83,9 +83,7 @@ def _run_loop(
         )
 
         if mouse.is_control_enabled():
-            mouse.move(pointer_result)
-            if gesture_result.should_click:
-                mouse.left_click()
+            _apply_mouse_control(mouse, pointer_result, gesture_result.should_click)
 
         debug_frame = debug_view.draw(
             frame,
@@ -118,6 +116,19 @@ def _fps(previous_time: float, now: float) -> float:
 
 def _mirror_frame(cv2: Any, frame: Any) -> Any:
     return cv2.flip(frame, 1)
+
+
+def _apply_mouse_control(
+    mouse: MouseController,
+    pointer_result: Any,
+    should_click: bool,
+) -> None:
+    try:
+        mouse.move(pointer_result)
+        if should_click:
+            mouse.left_click()
+    except MouseFailsafeTriggered:
+        mouse.set_control_enabled(False)
 
 
 def _load_cv2() -> Any:
