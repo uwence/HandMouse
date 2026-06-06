@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from handmouse.config import CameraConfig
 
 
 class Camera:
+    READ_RETRIES = 10
+    READ_RETRY_DELAY_SECONDS = 0.03
+
     def __init__(self, config: CameraConfig) -> None:
         self.config = config
         self._capture: Any | None = None
@@ -32,7 +36,13 @@ class Camera:
         if self._capture is None:
             raise RuntimeError("Camera is not open. Call open() before read().")
 
-        return self._capture.read()
+        for _ in range(self.READ_RETRIES):
+            ok, frame = self._capture.read()
+            if ok and frame is not None:
+                return ok, frame
+            time.sleep(self.READ_RETRY_DELAY_SECONDS)
+
+        return False, None
 
     def release(self) -> None:
         if self._capture is not None:

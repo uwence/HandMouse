@@ -63,7 +63,11 @@ def _run_loop(
     while True:
         ok, frame = camera.read()
         if not ok or frame is None:
-            raise RuntimeError("Could not read a frame from the camera.")
+            raise RuntimeError(
+                "Could not read a frame from the camera. Check Windows camera "
+                "permissions, close other apps using the camera, or change the "
+                "camera index in DEFAULT_CONFIG."
+            )
 
         now = time.perf_counter()
         fps = _fps(previous_frame_time, now)
