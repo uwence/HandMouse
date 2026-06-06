@@ -33,6 +33,7 @@ class PointerMapper:
         self._previous_x: float | None = None
         self._previous_y: float | None = None
         self._previous_output: ScreenPoint | None = None
+        self._previous_frame_point: FramePoint | None = None
 
     def update(self, point: FramePoint | None) -> ScreenPoint | None:
         if point is None:
@@ -51,6 +52,10 @@ class PointerMapper:
 
         self._previous_x = smoothed_x
         self._previous_y = smoothed_y
+        self._previous_frame_point = self._screen_to_control_region_point(
+            smoothed_x,
+            smoothed_y,
+        )
 
         output = ScreenPoint(round(smoothed_x), round(smoothed_y))
         if self._is_inside_dead_zone(output):
@@ -63,6 +68,11 @@ class PointerMapper:
         self._previous_x = None
         self._previous_y = None
         self._previous_output = None
+        self._previous_frame_point = None
+
+    @property
+    def last_frame_point(self) -> FramePoint | None:
+        return self._previous_frame_point
 
     def _map_to_screen(self, point: FramePoint) -> tuple[float, float]:
         region = self.config.control_region
@@ -86,6 +96,15 @@ class PointerMapper:
             output.y - self._previous_output.y,
         )
         return distance < self.config.dead_zone_px
+
+    def _screen_to_control_region_point(self, x: float, y: float) -> FramePoint:
+        region = self.config.control_region
+        screen_x = x / (self.screen_width - 1) if self.screen_width > 1 else 0.0
+        screen_y = y / (self.screen_height - 1) if self.screen_height > 1 else 0.0
+        return FramePoint(
+            region.left + screen_x * (region.right - region.left),
+            region.top + screen_y * (region.bottom - region.top),
+        )
 
     @staticmethod
     def _clamp(value: float, lower: float, upper: float) -> float:

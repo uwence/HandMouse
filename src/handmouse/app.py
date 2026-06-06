@@ -89,7 +89,7 @@ def _run_loop(
         debug_frame = debug_view.draw(
             frame,
             hand_result,
-            pointer_result,
+            mapper.last_frame_point,
             gesture_result,
             mouse.is_control_enabled(),
             fps,

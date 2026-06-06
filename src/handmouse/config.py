@@ -46,7 +46,7 @@ DEFAULT_CONFIG = AppConfig(
     pointer=PointerConfig(
         smoothing=0.35,
         dead_zone_px=4.0,
-        control_region=ControlRegion(left=0.0, top=0.0, right=1.0, bottom=1.0),
+        control_region=ControlRegion(left=0.12, top=0.10, right=0.88, bottom=0.90),
     ),
     gesture=GestureConfig(
         pinch_threshold=0.05,

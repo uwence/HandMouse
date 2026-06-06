@@ -1,4 +1,4 @@
-from handmouse.config import ControlRegion, PointerConfig
+from handmouse.config import DEFAULT_CONFIG, ControlRegion, PointerConfig
 from handmouse.pointer_mapper import FramePoint, PointerMapper, ScreenPoint
 
 
@@ -82,3 +82,23 @@ def test_dead_zone_reset_clears_previous_output() -> None:
     assert mapper.update(FramePoint(0.5, 0.5)) == ScreenPoint(50, 50)
     assert mapper.update(None) is None
     assert mapper.update(FramePoint(0.51, 0.51)) == ScreenPoint(52, 52)
+
+
+def test_default_control_region_is_inset_from_frame_edges() -> None:
+    region = DEFAULT_CONFIG.pointer.control_region
+
+    assert 0.0 < region.left < region.right < 1.0
+    assert 0.0 < region.top < region.bottom < 1.0
+
+
+def test_last_frame_point_tracks_smoothed_target_inside_control_region() -> None:
+    mapper = make_mapper(
+        smoothing=0.5,
+        control_region=ControlRegion(left=0.1, top=0.2, right=0.9, bottom=0.8),
+    )
+
+    mapper.update(FramePoint(0.1, 0.2))
+    assert mapper.last_frame_point == FramePoint(0.1, 0.2)
+
+    mapper.update(FramePoint(0.9, 0.8))
+    assert mapper.last_frame_point == FramePoint(0.5, 0.5)
