@@ -81,7 +81,14 @@ class HandTracker:
         )
 
     def close(self) -> None:
-        self._hands.close()
+        hands = getattr(self, "_hands", None)
+        if hands is None:
+            return
+
+        try:
+            hands.close()
+        finally:
+            self._hands = None
 
     @staticmethod
     def _landmark_at(landmarks: list[FramePoint], index: int) -> FramePoint | None:
