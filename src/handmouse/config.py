@@ -66,7 +66,7 @@ DEFAULT_CONFIG = AppConfig(
         release_threshold=0.08,
     ),
     shortcut=ShortcutConfig(
-        min_distance=0.18,
+        min_distance=0.28,
         max_duration_ms=900,
         cooldown_ms=700,
         axis_ratio=1.4,

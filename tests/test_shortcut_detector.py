@@ -1,4 +1,4 @@
-from handmouse.config import ShortcutConfig
+from handmouse.config import DEFAULT_CONFIG, ShortcutConfig
 from handmouse.pointer_mapper import FramePoint
 from handmouse.shortcut_detector import (
     ShortcutAction,
@@ -87,3 +87,11 @@ def test_no_hand_resets_anchor() -> None:
     detector.update(FramePoint(0.5, 0.5), now_ms=0)
     assert detector.update(None, now_ms=50).state == ShortcutState.NO_HAND
     assert detector.update(FramePoint(0.9, 0.5), now_ms=100).action is None
+
+
+def test_default_config_requires_larger_swipe_amplitude() -> None:
+    detector = ShortcutDetector(DEFAULT_CONFIG.shortcut)
+
+    assert detector.update(FramePoint(0.5, 0.5), now_ms=0).action is None
+    assert detector.update(FramePoint(0.7, 0.5), now_ms=120).action is None
+    assert detector.update(FramePoint(0.8, 0.5), now_ms=240).action == ShortcutAction.SWIPE_RIGHT
