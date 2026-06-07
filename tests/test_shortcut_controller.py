@@ -35,7 +35,7 @@ def test_horizontal_swipes_press_arrow_keys(monkeypatch) -> None:
     controller.execute(ShortcutAction.SWIPE_LEFT)
     controller.execute(ShortcutAction.SWIPE_RIGHT)
 
-    assert backend.presses == ["left", "right"]
+    assert backend.presses == ["left"] * 4 + ["right"] * 4
 
 
 def test_vertical_swipes_scroll(monkeypatch) -> None:
@@ -47,4 +47,4 @@ def test_vertical_swipes_scroll(monkeypatch) -> None:
     controller.execute(ShortcutAction.SWIPE_UP)
     controller.execute(ShortcutAction.SWIPE_DOWN)
 
-    assert backend.scrolls == [5, -5]
+    assert backend.scrolls == [20, -20]

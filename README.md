@@ -43,10 +43,10 @@ This branch experiments with discrete shortcut gestures instead of continuous mo
 
 In debug mode, detected gestures are only displayed in the overlay. After pressing `m`, detected gestures execute these actions:
 
-- Swipe left: press the left arrow key.
-- Swipe right: press the right arrow key.
-- Swipe up: scroll up.
-- Swipe down: scroll down.
+- Swipe left: press the left arrow key 4 times.
+- Swipe right: press the right arrow key 4 times.
+- Swipe up: scroll up by 20 units.
+- Swipe down: scroll down by 20 units.
 
 The detector uses broad, fast index-finger swipes and ignores diagonal or slow movement. This is intentionally less precise than mouse control, but should be more stable for presentations, page navigation, and reading.
 

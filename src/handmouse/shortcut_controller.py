@@ -12,6 +12,9 @@ except ModuleNotFoundError:
 
 
 class ShortcutController:
+    ARROW_PRESS_REPEATS = 4
+    SCROLL_AMOUNT = 20
+
     def __init__(self) -> None:
         self._enabled = False
 
@@ -27,19 +30,23 @@ class ShortcutController:
 
         backend = self._backend()
         if action == ShortcutAction.SWIPE_LEFT:
-            backend.press("left")
+            self._press_repeatedly(backend, "left")
         elif action == ShortcutAction.SWIPE_RIGHT:
-            backend.press("right")
+            self._press_repeatedly(backend, "right")
         elif action == ShortcutAction.SWIPE_UP:
-            backend.scroll(5)
+            backend.scroll(self.SCROLL_AMOUNT)
         elif action == ShortcutAction.SWIPE_DOWN:
-            backend.scroll(-5)
+            backend.scroll(-self.SCROLL_AMOUNT)
 
     def _backend(self) -> Any:
         if pyautogui is None:
             raise RuntimeError("PyAutoGUI is required to execute gesture shortcuts.")
 
         return pyautogui
+
+    def _press_repeatedly(self, backend: Any, key: str) -> None:
+        for _ in range(self.ARROW_PRESS_REPEATS):
+            backend.press(key)
 
 
 __all__ = ["ShortcutController"]
