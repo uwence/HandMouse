@@ -4,8 +4,21 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from math import hypot
 
-from handmouse.config import GrabScrollConfig
 from handmouse.pointer_mapper import FramePoint
+
+
+@dataclass(frozen=True)
+class GrabScrollConfig:
+    hold_ms: int = 120
+    release_grace_ms: int = 120
+    dead_zone: float = 0.015
+    scroll_sensitivity: float = 180.0
+    max_scroll_per_frame: int = 18
+    thumb_index_max_distance: float = 1.8
+    curled_finger_ratio: float = 1.65
+    min_curled_fingers: int = 2
+    post_release_grace_ms: int = 120
+    only_active_when_draging: bool = True
 
 
 class GrabScrollState(Enum):
@@ -40,8 +53,10 @@ class GrabScrollDetector:
 
     def __init__(self, config: GrabScrollConfig) -> None:
         self.config = config
+        self._state = GrabScrollState.NO_HAND
         self._candidate_started_ms: int | None = None
         self._last_seen_grab_ms: int | None = None
+        self._released_at_ms: int | None = None
         self._anchor: FramePoint | None = None
         self._previous: FramePoint | None = None
 
@@ -50,21 +65,33 @@ class GrabScrollDetector:
         landmarks: list[FramePoint] | None,
         now_ms: int,
     ) -> GrabScrollResult:
+        self._expire_release(now_ms)
+
         if not landmarks:
-            self.reset()
-            return GrabScrollResult(
-                GrabScrollState.NO_HAND,
-                False,
-                0,
-                None,
-                None,
-                False,
-            )
+            return self._handle_missing_hand(now_ms)
 
         center = _hand_center(landmarks)
         if center is None:
-            self.reset()
-            return GrabScrollResult(
+            return self._handle_missing_hand(now_ms)
+
+        is_grab = self._is_grab_pose(landmarks)
+        if not is_grab:
+            return self._handle_non_grab(now_ms)
+
+        return self._handle_grab(center, now_ms)
+
+    def reset(self) -> None:
+        self._state = GrabScrollState.NO_HAND
+        self._candidate_started_ms = None
+        self._last_seen_grab_ms = None
+        self._released_at_ms = None
+        self._anchor = None
+        self._previous = None
+
+    def _handle_missing_hand(self, now_ms: int) -> GrabScrollResult:
+        if self._last_seen_grab_ms is None and self._released_at_ms is None:
+            self._state = GrabScrollState.NO_HAND
+            return self._result(
                 GrabScrollState.NO_HAND,
                 False,
                 0,
@@ -73,34 +100,55 @@ class GrabScrollDetector:
                 False,
             )
 
-        is_grab = self._is_grab_pose(landmarks)
-        if not is_grab:
-            if self._should_release(now_ms):
-                self.reset()
-                return GrabScrollResult(
-                    GrabScrollState.RELEASED,
-                    False,
-                    0,
-                    None,
-                    None,
-                    False,
-                )
+        if self._last_seen_grab_ms is not None and now_ms - self._last_seen_grab_ms >= self.config.release_grace_ms:
+            self._begin_release(now_ms)
 
-            return GrabScrollResult(
-                GrabScrollState.GRABBING,
-                True,
+        self._state = GrabScrollState.RELEASED
+        return self._result(
+            GrabScrollState.RELEASED,
+            False,
+            0,
+            None,
+            None,
+            False,
+        )
+
+    def _handle_non_grab(self, now_ms: int) -> GrabScrollResult:
+        if self._last_seen_grab_ms is None and self._released_at_ms is None:
+            self._state = GrabScrollState.RELEASED
+            self._begin_release(now_ms)
+            return self._result(
+                GrabScrollState.RELEASED,
+                False,
                 0,
-                0.0,
-                0.0,
+                None,
+                None,
                 False,
             )
 
+        if self._last_seen_grab_ms is not None and now_ms - self._last_seen_grab_ms >= self.config.release_grace_ms:
+            self._begin_release(now_ms)
+
+        self._state = GrabScrollState.RELEASED
+        return self._result(
+            GrabScrollState.RELEASED,
+            False,
+            0,
+            None,
+            None,
+            False,
+        )
+
+    def _handle_grab(self, center: FramePoint, now_ms: int) -> GrabScrollResult:
         self._last_seen_grab_ms = now_ms
-        if self._candidate_started_ms is None:
+
+        if self._candidate_started_ms is None or self._anchor is None:
             self._candidate_started_ms = now_ms
             self._anchor = center
             self._previous = center
-            return GrabScrollResult(
+            self._state = GrabScrollState.CANDIDATE
+            self._released_at_ms = None
+            return self._result(
                 GrabScrollState.CANDIDATE,
                 False,
                 0,
@@ -111,7 +159,9 @@ class GrabScrollDetector:
 
         if now_ms - self._candidate_started_ms < self.config.hold_ms:
             self._previous = center
-            return GrabScrollResult(
+            self._state = GrabScrollState.CANDIDATE
+            self._released_at_ms = None
+            return self._result(
                 GrabScrollState.CANDIDATE,
                 False,
                 0,
@@ -122,31 +172,58 @@ class GrabScrollDetector:
 
         previous = self._previous or center
         self._previous = center
-        dx = center.x - (self._anchor or center).x
-        dy = center.y - (self._anchor or center).y
+        dx = center.x - self._anchor.x
+        dy = center.y - self._anchor.y
         frame_delta_y = center.y - previous.y
         scroll_delta = self._scroll_delta(frame_delta_y)
         state = GrabScrollState.DRAGGING if scroll_delta else GrabScrollState.GRABBING
-        return GrabScrollResult(
+        self._state = state
+        self._released_at_ms = None
+        return self._result(
             state,
-            True,
+            state == GrabScrollState.DRAGGING and scroll_delta != 0,
             scroll_delta,
             dx,
             dy,
             True,
         )
 
-    def reset(self) -> None:
+    def _begin_release(self, now_ms: int) -> None:
+        self._state = GrabScrollState.RELEASED
+        if self._released_at_ms is None:
+            self._released_at_ms = now_ms
+
+    def _expire_release(self, now_ms: int) -> None:
+        if self._released_at_ms is None:
+            return
+
+        if now_ms - self._released_at_ms < self.config.post_release_grace_ms:
+            return
+
         self._candidate_started_ms = None
         self._last_seen_grab_ms = None
+        self._released_at_ms = None
         self._anchor = None
         self._previous = None
+        self._state = GrabScrollState.NO_HAND
 
-    def _should_release(self, now_ms: int) -> bool:
-        if self._last_seen_grab_ms is None:
-            return True
-
-        return now_ms - self._last_seen_grab_ms >= self.config.release_grace_ms
+    def _result(
+        self,
+        state: GrabScrollState,
+        active: bool,
+        scroll_delta: int,
+        displacement_x: float | None,
+        displacement_y: float | None,
+        is_grab_pose: bool,
+    ) -> GrabScrollResult:
+        return GrabScrollResult(
+            state,
+            active,
+            scroll_delta,
+            displacement_x,
+            displacement_y,
+            is_grab_pose,
+        )
 
     def _scroll_delta(self, frame_delta_y: float) -> int:
         if abs(frame_delta_y) < self.config.dead_zone:
@@ -223,6 +300,7 @@ def _distance(a: FramePoint, b: FramePoint) -> float:
 
 
 __all__ = [
+    "GrabScrollConfig",
     "GrabScrollDetector",
     "GrabScrollResult",
     "GrabScrollState",

@@ -1,5 +1,8 @@
-from handmouse.config import GrabScrollConfig
-from handmouse.grab_scroll_detector import GrabScrollDetector, GrabScrollState
+from handmouse.grab_scroll_detector import (
+    GrabScrollConfig,
+    GrabScrollDetector,
+    GrabScrollState,
+)
 from handmouse.pointer_mapper import FramePoint
 
 
@@ -13,6 +16,8 @@ def make_config() -> GrabScrollConfig:
         thumb_index_max_distance=1.8,
         curled_finger_ratio=1.65,
         min_curled_fingers=2,
+        post_release_grace_ms=120,
+        only_active_when_draging=True,
     )
 
 
@@ -48,69 +53,106 @@ def open_landmarks() -> list[FramePoint]:
     return points
 
 
-def test_open_hand_does_not_activate_grab_scroll() -> None:
+def test_initial_no_hand() -> None:
     detector = make_detector()
 
-    result = detector.update(open_landmarks(), now_ms=0)
+    result = detector.update(None, now_ms=0)
 
-    assert result.state == GrabScrollState.RELEASED
+    assert result.state == GrabScrollState.NO_HAND
     assert result.active is False
     assert result.scroll_delta == 0
 
 
-def test_grab_pose_must_be_held_before_activation() -> None:
+def test_grab_pose_enters_candidate() -> None:
     detector = make_detector()
 
-    first = detector.update(grab_landmarks(), now_ms=0)
-    second = detector.update(grab_landmarks(), now_ms=50)
-    third = detector.update(grab_landmarks(), now_ms=120)
+    result = detector.update(grab_landmarks(), now_ms=0)
 
-    assert first.state == GrabScrollState.CANDIDATE
-    assert first.active is False
-    assert second.state == GrabScrollState.CANDIDATE
-    assert second.active is False
-    assert third.state == GrabScrollState.GRABBING
-    assert third.active is True
+    assert result.state == GrabScrollState.CANDIDATE
+    assert result.active is False
+    assert result.is_grab_pose is True
 
 
-def test_grab_drag_outputs_scroll_delta() -> None:
+def test_hold_then_move_enters_dragging() -> None:
     detector = make_detector()
 
     detector.update(grab_landmarks(), now_ms=0)
-    detector.update(grab_landmarks(), now_ms=120)
-    result = detector.update(grab_landmarks(y_offset=-0.08), now_ms=160)
+    detector.update(grab_landmarks(), now_ms=100)
+    result = detector.update(grab_landmarks(y_offset=-0.08), now_ms=140)
 
     assert result.state == GrabScrollState.DRAGGING
     assert result.scroll_delta == 12
+    assert result.active is True
 
 
-def test_small_grab_motion_is_dead_zoned() -> None:
+def test_release_exits_to_released() -> None:
     detector = make_detector()
 
     detector.update(grab_landmarks(), now_ms=0)
-    detector.update(grab_landmarks(), now_ms=120)
-    result = detector.update(grab_landmarks(y_offset=0.005), now_ms=160)
+    detector.update(grab_landmarks(), now_ms=100)
+    detector.update(grab_landmarks(y_offset=-0.08), now_ms=140)
 
-    assert result.state == GrabScrollState.GRABBING
-    assert result.scroll_delta == 0
-
-
-def test_releasing_grab_resets_state() -> None:
-    detector = make_detector()
-
-    detector.update(grab_landmarks(), now_ms=0)
-    detector.update(grab_landmarks(), now_ms=120)
     result = detector.update(open_landmarks(), now_ms=260)
 
     assert result.state == GrabScrollState.RELEASED
     assert result.active is False
-    assert detector.update(grab_landmarks(y_offset=0.2), now_ms=280).state == GrabScrollState.CANDIDATE
+    assert result.scroll_delta == 0
 
 
-def test_no_hand_resets_state() -> None:
+def test_static_grab_hold_does_not_emit_scroll() -> None:
     detector = make_detector()
 
     detector.update(grab_landmarks(), now_ms=0)
-    detector.update(grab_landmarks(), now_ms=120)
-    assert detector.update(None, now_ms=160).state == GrabScrollState.NO_HAND
-    assert detector.update(grab_landmarks(y_offset=0.2), now_ms=180).state == GrabScrollState.CANDIDATE
+    detector.update(grab_landmarks(), now_ms=100)
+    result = detector.update(grab_landmarks(), now_ms=160)
+
+    assert result.state == GrabScrollState.GRABBING
+    assert result.scroll_delta == 0
+    assert result.active is False
+
+
+def test_active_only_true_when_dragging() -> None:
+    detector = make_detector()
+
+    detector.update(grab_landmarks(), now_ms=0)
+    detector.update(grab_landmarks(), now_ms=100)
+    hold = detector.update(grab_landmarks(), now_ms=160)
+    drag = detector.update(grab_landmarks(y_offset=-0.08), now_ms=200)
+
+    assert hold.state == GrabScrollState.GRABBING
+    assert hold.active is False
+    assert drag.state == GrabScrollState.DRAGGING
+    assert drag.active is True
+    assert drag.scroll_delta != 0
+
+
+def test_release_grace_preserves_anchor_during_brief_loss() -> None:
+    detector = make_detector()
+
+    detector.update(grab_landmarks(), now_ms=0)
+    detector.update(grab_landmarks(), now_ms=100)
+    first_drag = detector.update(grab_landmarks(y_offset=-0.08), now_ms=140)
+    missing = detector.update(None, now_ms=180)
+    resumed = detector.update(grab_landmarks(y_offset=-0.12), now_ms=210)
+
+    assert first_drag.state == GrabScrollState.DRAGGING
+    assert missing.state == GrabScrollState.RELEASED
+    assert missing.active is False
+    assert resumed.state == GrabScrollState.DRAGGING
+    assert resumed.active is True
+    assert resumed.scroll_delta != 0
+
+
+def test_post_release_grace_smooths_re_grab() -> None:
+    detector = make_detector()
+
+    detector.update(grab_landmarks(), now_ms=0)
+    detector.update(grab_landmarks(), now_ms=100)
+    detector.update(grab_landmarks(y_offset=-0.08), now_ms=140)
+    released = detector.update(open_landmarks(), now_ms=260)
+    regrab = detector.update(grab_landmarks(y_offset=-0.12), now_ms=310)
+
+    assert released.state == GrabScrollState.RELEASED
+    assert regrab.state == GrabScrollState.DRAGGING
+    assert regrab.active is True
+    assert regrab.scroll_delta != 0
