@@ -37,22 +37,22 @@ $env:HANDMOUSE_MODEL_PATH = "C:\path\to\hand_landmarker.task"
 - `m`: toggle between debug mode and real shortcut-execution mode.
 - `q`: quit the application.
 
-## Gesture Shortcuts
+## Grab Scroll
 
-This branch experiments with discrete shortcut gestures instead of continuous mouse movement.
+This branch experiments with a grab-scroll gesture instead of continuous mouse movement.
 
-In debug mode, detected gestures are only displayed in the overlay. After pressing `m`, detected gestures execute these actions:
+In debug mode, detected grab state and scroll deltas are only displayed in the overlay. After pressing `m`, detected grab-scroll deltas execute real scroll events.
 
-- Swipe left: press the left arrow key 4 times.
-- Swipe right: press the right arrow key 4 times.
-- Swipe up: scroll up by 20 units.
-- Swipe down: scroll down by 20 units.
+- Make a claw/grab hand shape, like grabbing the page.
+- Hold the grab shape briefly until `Active: yes` appears.
+- Move the grabbed hand up or down to scroll the page.
+- Release the hand shape or move out of view to stop and reset.
 
-The detector uses broad, fast index-finger swipes and ignores diagonal or slow movement. This is intentionally less precise than mouse control, but should be more stable for presentations, page navigation, and reading.
+The detector intentionally requires a grab pose before scrolling. Normal hand movement should not execute shortcuts.
 
 ## Safety
 
-The app starts in debug mode, so hand tracking and detected shortcut actions can be inspected before real keyboard/scroll events are enabled.
+The app starts in debug mode, so hand tracking, grab state, and scroll deltas can be inspected before real scroll events are enabled.
 
 ## Troubleshooting
 

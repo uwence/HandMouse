@@ -38,6 +38,12 @@ class ShortcutController:
         elif action == ShortcutAction.SWIPE_DOWN:
             backend.scroll(-self.SCROLL_AMOUNT)
 
+    def scroll(self, amount: int) -> None:
+        if not self._enabled or amount == 0:
+            return
+
+        self._backend().scroll(amount)
+
     def _backend(self) -> Any:
         if pyautogui is None:
             raise RuntimeError("PyAutoGUI is required to execute gesture shortcuts.")

@@ -6,9 +6,9 @@ from typing import Any
 from handmouse.camera import Camera
 from handmouse.config import DEFAULT_CONFIG
 from handmouse.debug_view import DebugView
+from handmouse.grab_scroll_detector import GrabScrollDetector
 from handmouse.hand_tracker import HandTracker
 from handmouse.shortcut_controller import ShortcutController
-from handmouse.shortcut_detector import ShortcutDetector
 
 
 WINDOW_NAME = "HandMouse"
@@ -25,7 +25,7 @@ def main() -> None:
     try:
         camera.open()
         tracker = _create_tracker()
-        detector = ShortcutDetector(config.shortcut)
+        detector = GrabScrollDetector(config.grab_scroll)
         debug_view = DebugView(config)
 
         _run_loop(
@@ -49,7 +49,7 @@ def _run_loop(
     cv2: Any,
     camera: Camera,
     tracker: HandTracker,
-    detector: ShortcutDetector,
+    detector: GrabScrollDetector,
     shortcuts: ShortcutController,
     debug_view: DebugView,
 ) -> None:
@@ -70,10 +70,10 @@ def _run_loop(
         previous_frame_time = now
 
         hand_result = tracker.process(frame)
-        shortcut_result = detector.update(hand_result.index_tip, int(now * 1000))
+        shortcut_result = detector.update(hand_result.landmarks, int(now * 1000))
 
         if shortcuts.is_enabled():
-            shortcuts.execute(shortcut_result.action)
+            shortcuts.scroll(shortcut_result.scroll_delta)
 
         debug_frame = debug_view.draw(
             frame,

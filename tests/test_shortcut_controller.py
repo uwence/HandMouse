@@ -48,3 +48,25 @@ def test_vertical_swipes_scroll(monkeypatch) -> None:
     controller.execute(ShortcutAction.SWIPE_DOWN)
 
     assert backend.scrolls == [20, -20]
+
+
+def test_scroll_noops_when_disabled(monkeypatch) -> None:
+    backend = RecordingPyAutoGUI()
+    monkeypatch.setattr(shortcut_controller, "pyautogui", backend)
+    controller = ShortcutController()
+
+    controller.scroll(9)
+
+    assert backend.scrolls == []
+
+
+def test_scroll_uses_dynamic_amount_when_enabled(monkeypatch) -> None:
+    backend = RecordingPyAutoGUI()
+    monkeypatch.setattr(shortcut_controller, "pyautogui", backend)
+    controller = ShortcutController()
+    controller.set_enabled(True)
+
+    controller.scroll(9)
+    controller.scroll(-4)
+
+    assert backend.scrolls == [9, -4]

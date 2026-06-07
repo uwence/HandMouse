@@ -44,11 +44,24 @@ class ShortcutConfig:
 
 
 @dataclass(frozen=True)
+class GrabScrollConfig:
+    hold_ms: int
+    release_grace_ms: int
+    dead_zone: float
+    scroll_sensitivity: float
+    max_scroll_per_frame: int
+    thumb_index_max_distance: float
+    curled_finger_ratio: float
+    min_curled_fingers: int
+
+
+@dataclass(frozen=True)
 class AppConfig:
     camera: CameraConfig
     pointer: PointerConfig
     gesture: GestureConfig
     shortcut: ShortcutConfig
+    grab_scroll: GrabScrollConfig
 
 
 DEFAULT_CONFIG = AppConfig(
@@ -70,5 +83,15 @@ DEFAULT_CONFIG = AppConfig(
         max_duration_ms=900,
         cooldown_ms=700,
         axis_ratio=1.4,
+    ),
+    grab_scroll=GrabScrollConfig(
+        hold_ms=120,
+        release_grace_ms=120,
+        dead_zone=0.015,
+        scroll_sensitivity=180.0,
+        max_scroll_per_frame=18,
+        thumb_index_max_distance=1.8,
+        curled_finger_ratio=1.65,
+        min_curled_fingers=2,
     ),
 )
