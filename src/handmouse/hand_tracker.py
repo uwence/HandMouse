@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import time
+import warnings
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
@@ -34,11 +36,13 @@ class HandTracker:
     def __init__(
         self,
         *,
-        static_image_mode: bool = False,
-        max_num_hands: int = 2,
-        min_detection_confidence: float = 0.5,
+        running_mode: Any = None,
+        num_hands: int = 1,
+        min_hand_detection_confidence: float = 0.5,
+        min_hand_presence_confidence: float = 0.5,
         min_tracking_confidence: float = 0.5,
         model_path: str | Path | None = None,
+        static_image_mode: bool | None = None,
     ) -> None:
         try:
             import mediapipe as mp
@@ -49,21 +53,43 @@ class HandTracker:
                 "MediaPipe is required for hand tracking. Install mediapipe."
             ) from exc
 
+        if running_mode is None:
+            running_mode = vision.RunningMode.VIDEO
+
+        if static_image_mode is not None:
+            warnings.warn(
+                "HandTracker(static_image_mode=...) is deprecated; use running_mode=...",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if running_mode == vision.RunningMode.VIDEO:
+                running_mode = (
+                    vision.RunningMode.IMAGE
+                    if static_image_mode
+                    else vision.RunningMode.VIDEO
+                )
+
         resolved_model_path = _resolve_model_path(model_path)
         options = vision.HandLandmarkerOptions(
             base_options=BaseOptions(model_asset_path=str(resolved_model_path)),
-            running_mode=vision.RunningMode.IMAGE,
-            num_hands=max_num_hands,
-            min_hand_detection_confidence=min_detection_confidence,
-            min_hand_presence_confidence=min_detection_confidence,
+            running_mode=running_mode,
+            num_hands=num_hands,
+            min_hand_detection_confidence=min_hand_detection_confidence,
+            min_hand_presence_confidence=min_hand_presence_confidence,
             min_tracking_confidence=min_tracking_confidence,
         )
         self._mp = mp
+        self._running_mode = running_mode
+        self._image_mode = vision.RunningMode.IMAGE
+        self._live_stream_mode = getattr(vision.RunningMode, "LIVE_STREAM", None)
         self._landmarker = vision.HandLandmarker.create_from_options(options)
         self._hands = self._landmarker
-        self._static_image_mode = static_image_mode
 
-    def process(self, frame_bgr: Any) -> HandTrackingResult:
+    def process(
+        self,
+        frame_bgr: Any,
+        frame_timestamp_ms: int | None = None,
+    ) -> HandTrackingResult:
         try:
             import cv2
         except ImportError as exc:
@@ -76,7 +102,31 @@ class HandTracker:
             image_format=self._mp.ImageFormat.SRGB,
             data=frame_rgb,
         )
-        result = self._landmarker.detect(image)
+
+        if self._running_mode == self._image_mode:
+            if frame_timestamp_ms is not None:
+                warnings.warn(
+                    "HandTracker.process(frame_bgr, frame_timestamp_ms) is ignored in IMAGE mode.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            result = self._landmarker.detect(image)
+        else:
+            if self._running_mode == self._live_stream_mode:
+                raise RuntimeError(
+                    "HandTracker.process() does not support LIVE_STREAM mode; "
+                    "implement process_async() for that path."
+                )
+
+            if frame_timestamp_ms is None:
+                warnings.warn(
+                    "HandTracker.process(frame_bgr) is deprecated; pass frame_timestamp_ms for VIDEO mode.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                frame_timestamp_ms = int(time.perf_counter() * 1000)
+
+            result = self._landmarker.detect_for_video(image, frame_timestamp_ms)
 
         if not result.hand_landmarks:
             return HandTrackingResult(
