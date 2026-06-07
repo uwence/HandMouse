@@ -4,15 +4,23 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from math import hypot
 
-from handmouse.config import GestureConfig
 from handmouse.pointer_mapper import FramePoint
 
 
+@dataclass(frozen=True)
+class GestureConfig:
+    pinch_close: float = 0.05
+    pinch_open: float = 0.075
+    confirm_frames: int = 2
+    release_confirm_frames: int = 2
+    cooldown_ms: int = 150
+    emit_on_release: bool = True
+
+
 class GestureState(Enum):
-    NO_HAND = auto()
-    MOVING = auto()
-    PINCH_CANDIDATE = auto()
-    CLICK = auto()
+    PINCH_OPEN = auto()
+    PINCH_PRESSED = auto()
+    PINCH_HOLD = auto()
     COOLDOWN = auto()
 
 
@@ -26,10 +34,10 @@ class GestureResult:
 class GestureDetector:
     def __init__(self, config: GestureConfig) -> None:
         self.config = config
-        self._state = GestureState.NO_HAND
-        self._pinch_started_ms: int | None = None
+        self._state = GestureState.PINCH_OPEN
+        self._close_count = 0
+        self._release_count = 0
         self._cooldown_until_ms = 0
-        self._released_after_click = True
 
     def update(
         self,
@@ -39,52 +47,59 @@ class GestureDetector:
     ) -> GestureResult:
         if thumb is None or index is None:
             self.reset()
-            return GestureResult(GestureState.NO_HAND, False, None)
+            return GestureResult(GestureState.PINCH_OPEN, False, None)
 
         distance = hypot(thumb.x - index.x, thumb.y - index.y)
 
-        if self._state == GestureState.COOLDOWN:
-            return self._update_cooldown(distance, now_ms)
-
-        if distance < self.config.pinch_threshold:
-            return self._update_pinch_candidate(distance, now_ms)
-
-        self._state = GestureState.MOVING
-        self._pinch_started_ms = None
-        return GestureResult(self._state, False, distance)
-
-    def reset(self) -> None:
-        self._state = GestureState.NO_HAND
-        self._pinch_started_ms = None
-        self._cooldown_until_ms = 0
-        self._released_after_click = True
-
-    def _update_cooldown(self, distance: float, now_ms: int) -> GestureResult:
-        if distance > self.config.release_threshold:
-            self._released_after_click = True
-
-        if now_ms < self._cooldown_until_ms or not self._released_after_click:
+        if self._state == GestureState.COOLDOWN and now_ms < self._cooldown_until_ms:
             return GestureResult(GestureState.COOLDOWN, False, distance)
 
-        self._state = GestureState.MOVING
-        self._pinch_started_ms = None
+        if self._state == GestureState.COOLDOWN and now_ms >= self._cooldown_until_ms:
+            self._state = GestureState.PINCH_OPEN
+            self._close_count = 0
+            self._release_count = 0
+            self._cooldown_until_ms = 0
+
+        if self._state == GestureState.PINCH_OPEN:
+            return self._update_open(distance)
+
+        return self._update_pressed_or_hold(distance, now_ms)
+
+    def reset(self) -> None:
+        self._state = GestureState.PINCH_OPEN
+        self._close_count = 0
+        self._release_count = 0
+        self._cooldown_until_ms = 0
+
+    def _update_open(self, distance: float) -> GestureResult:
+        if distance < self.config.pinch_close:
+            self._close_count += 1
+            if self._close_count >= self.config.confirm_frames:
+                self._state = GestureState.PINCH_PRESSED
+                self._release_count = 0
+                self._close_count = 0
+                return GestureResult(self._state, False, distance)
+            return GestureResult(GestureState.PINCH_OPEN, False, distance)
+
+        self._close_count = 0
+        return GestureResult(GestureState.PINCH_OPEN, False, distance)
+
+    def _update_pressed_or_hold(self, distance: float, now_ms: int) -> GestureResult:
+        if distance <= self.config.pinch_open:
+            self._release_count = 0
+            if self._state == GestureState.PINCH_PRESSED:
+                self._state = GestureState.PINCH_HOLD
+            return GestureResult(self._state, False, distance)
+
+        self._release_count += 1
+        if self._release_count >= self.config.release_confirm_frames:
+            self._state = GestureState.COOLDOWN
+            self._cooldown_until_ms = now_ms + self.config.cooldown_ms
+            self._close_count = 0
+            self._release_count = 0
+            return GestureResult(GestureState.COOLDOWN, self.config.emit_on_release, distance)
+
         return GestureResult(self._state, False, distance)
 
-    def _update_pinch_candidate(self, distance: float, now_ms: int) -> GestureResult:
-        if self._state != GestureState.PINCH_CANDIDATE:
-            self._state = GestureState.PINCH_CANDIDATE
-            self._pinch_started_ms = now_ms
 
-        if self._pinch_started_ms is not None:
-            held_ms = now_ms - self._pinch_started_ms
-            if held_ms >= self.config.hold_ms:
-                self._state = GestureState.COOLDOWN
-                self._pinch_started_ms = None
-                self._cooldown_until_ms = now_ms + self.config.cooldown_ms
-                self._released_after_click = False
-                return GestureResult(GestureState.CLICK, True, distance)
-
-        return GestureResult(GestureState.PINCH_CANDIDATE, False, distance)
-
-
-__all__ = ["GestureDetector", "GestureResult", "GestureState"]
+__all__ = ["GestureConfig", "GestureDetector", "GestureResult", "GestureState"]
