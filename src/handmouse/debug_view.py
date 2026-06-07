@@ -202,6 +202,7 @@ class DebugView:
         lines = [
             f"Mode: {'CONTROL' if control_enabled else 'DEBUG'}",
             f"Gesture: {_gesture_state_name(gesture_result)}",
+            f"Action: {_gesture_action_name(gesture_result)}",
             f"FPS: {fps:.1f}",
             f"Pinch: {_pinch_distance(gesture_result)}",
             f"Hand: {_hand_info(hand_result)}",
@@ -355,6 +356,14 @@ def _gesture_state_name(gesture_result: GestureResult | None) -> str:
         return state.name
 
     return getattr(state, "name", str(state))
+
+
+def _gesture_action_name(gesture_result: Any | None) -> str:
+    action = getattr(gesture_result, "action", None)
+    if action is None:
+        return "n/a"
+
+    return getattr(action, "name", str(action))
 
 
 def _pinch_distance(gesture_result: GestureResult | None) -> str:

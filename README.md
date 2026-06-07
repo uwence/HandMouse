@@ -1,6 +1,6 @@
 # HandMouse
 
-Windows-native Python prototype for controlling the mouse with webcam-based hand gestures.
+Windows-native Python prototype for controlling shortcuts with webcam-based hand gestures.
 
 ## Windows Setup
 
@@ -34,23 +34,28 @@ $env:HANDMOUSE_MODEL_PATH = "C:\path\to\hand_landmarker.task"
 
 ## Controls
 
-- `m`: toggle between debug mode and real mouse-control mode.
+- `m`: toggle between debug mode and real shortcut-execution mode.
 - `q`: quit the application.
 
-## Mouse Behavior
+## Gesture Shortcuts
 
-HandMouse uses a virtual touchpad model by default. The debug window shows an inset control rectangle. When real mouse-control mode is enabled, moving your index finger inside that rectangle moves the cursor by a matching relative delta, similar to a physical mouse or touchpad.
+This branch experiments with discrete shortcut gestures instead of continuous mouse movement.
 
-The first detected frame inside the rectangle anchors the hand position and does not move the cursor. Moving outside the rectangle resets the anchor, like lifting your finger from a touchpad, so re-entering the rectangle should not cause a large jump.
+In debug mode, detected gestures are only displayed in the overlay. After pressing `m`, detected gestures execute these actions:
 
-Thumb-index pinch still triggers left click. During pinch/click/cooldown, movement is paused and the relative anchor is reset so releasing the gesture does not drag the cursor back.
+- Swipe left: press the left arrow key.
+- Swipe right: press the right arrow key.
+- Swipe up: scroll up.
+- Swipe down: scroll down.
+
+The detector uses broad, fast index-finger swipes and ignores diagonal or slow movement. This is intentionally less precise than mouse control, but should be more stable for presentations, page navigation, and reading.
 
 ## Safety
 
-The app starts in debug mode, so hand tracking and cursor targets can be inspected before real mouse movement is enabled. PyAutoGUI failsafe stays enabled, allowing the real mouse to be moved to a screen corner to abort if control becomes unstable.
+The app starts in debug mode, so hand tracking and detected shortcut actions can be inspected before real keyboard/scroll events are enabled.
 
 ## Troubleshooting
 
 - If startup says it cannot read a frame from the camera, check Windows camera permissions, close other apps using the camera, and try a different camera index in `DEFAULT_CONFIG`.
 - If the hand model download fails, manually download `hand_landmarker.task` from the MediaPipe model URL shown in the error, then set `HANDMOUSE_MODEL_PATH`.
-- If real mouse movement feels unsafe, press `m` to return to debug mode, press `q` to quit, or move the physical mouse to a screen corner to trigger the PyAutoGUI failsafe.
+- If shortcut execution feels noisy, press `m` to return to debug mode or press `q` to quit.

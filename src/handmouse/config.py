@@ -36,10 +36,19 @@ class GestureConfig:
 
 
 @dataclass(frozen=True)
+class ShortcutConfig:
+    min_distance: float
+    max_duration_ms: int
+    cooldown_ms: int
+    axis_ratio: float
+
+
+@dataclass(frozen=True)
 class AppConfig:
     camera: CameraConfig
     pointer: PointerConfig
     gesture: GestureConfig
+    shortcut: ShortcutConfig
 
 
 DEFAULT_CONFIG = AppConfig(
@@ -55,5 +64,11 @@ DEFAULT_CONFIG = AppConfig(
         hold_ms=120,
         cooldown_ms=350,
         release_threshold=0.08,
+    ),
+    shortcut=ShortcutConfig(
+        min_distance=0.18,
+        max_duration_ms=900,
+        cooldown_ms=700,
+        axis_ratio=1.4,
     ),
 )

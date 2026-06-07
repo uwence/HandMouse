@@ -6,10 +6,9 @@ from typing import Any
 from handmouse.camera import Camera
 from handmouse.config import DEFAULT_CONFIG
 from handmouse.debug_view import DebugView
-from handmouse.gesture_detector import GestureDetector, GestureState
 from handmouse.hand_tracker import HandTracker
-from handmouse.mouse_controller import MouseController, MouseFailsafeTriggered
-from handmouse.pointer_mapper import RelativePointerMapper
+from handmouse.shortcut_controller import ShortcutController
+from handmouse.shortcut_detector import ShortcutDetector
 
 
 WINDOW_NAME = "HandMouse"
@@ -18,8 +17,7 @@ WINDOW_NAME = "HandMouse"
 def main() -> None:
     config = DEFAULT_CONFIG
     cv2 = _load_cv2()
-    mouse = MouseController()
-    screen_width, screen_height = _screen_size()
+    shortcuts = ShortcutController()
 
     camera = Camera(config.camera)
     tracker: HandTracker | None = None
@@ -27,21 +25,19 @@ def main() -> None:
     try:
         camera.open()
         tracker = _create_tracker()
-        mapper = RelativePointerMapper(screen_width, screen_height, config.pointer)
-        detector = GestureDetector(config.gesture)
+        detector = ShortcutDetector(config.shortcut)
         debug_view = DebugView(config)
 
         _run_loop(
             cv2=cv2,
             camera=camera,
             tracker=tracker,
-            mapper=mapper,
             detector=detector,
-            mouse=mouse,
+            shortcuts=shortcuts,
             debug_view=debug_view,
         )
     finally:
-        mouse.set_control_enabled(False)
+        shortcuts.set_enabled(False)
         camera.release()
         if tracker is not None:
             tracker.close()
@@ -53,9 +49,8 @@ def _run_loop(
     cv2: Any,
     camera: Camera,
     tracker: HandTracker,
-    mapper: RelativePointerMapper,
-    detector: GestureDetector,
-    mouse: MouseController,
+    detector: ShortcutDetector,
+    shortcuts: ShortcutController,
     debug_view: DebugView,
 ) -> None:
     previous_frame_time = time.perf_counter()
@@ -75,27 +70,17 @@ def _run_loop(
         previous_frame_time = now
 
         hand_result = tracker.process(frame)
-        gesture_result = detector.update(
-            hand_result.thumb_tip,
-            hand_result.index_tip,
-            int(now * 1000),
-        )
-        movement_point = (
-            hand_result.index_tip
-            if gesture_result.state == GestureState.MOVING
-            else None
-        )
-        pointer_delta = mapper.update(movement_point)
+        shortcut_result = detector.update(hand_result.index_tip, int(now * 1000))
 
-        if mouse.is_control_enabled():
-            _apply_mouse_control(mouse, pointer_delta, gesture_result.should_click)
+        if shortcuts.is_enabled():
+            shortcuts.execute(shortcut_result.action)
 
         debug_frame = debug_view.draw(
             frame,
             hand_result,
-            mapper.last_frame_point,
-            gesture_result,
-            mouse.is_control_enabled(),
+            hand_result.index_tip,
+            shortcut_result,
+            shortcuts.is_enabled(),
             fps,
         )
 
@@ -103,7 +88,7 @@ def _run_loop(
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord("m"):
-            mouse.set_control_enabled(not mouse.is_control_enabled())
+            shortcuts.set_enabled(not shortcuts.is_enabled())
         elif key == ord("q"):
             break
 
@@ -123,19 +108,6 @@ def _mirror_frame(cv2: Any, frame: Any) -> Any:
     return cv2.flip(frame, 1)
 
 
-def _apply_mouse_control(
-    mouse: MouseController,
-    pointer_result: Any,
-    should_click: bool,
-) -> None:
-    try:
-        mouse.move_relative(pointer_result)
-        if should_click:
-            mouse.left_click()
-    except MouseFailsafeTriggered:
-        mouse.set_control_enabled(False)
-
-
 def _load_cv2() -> Any:
     try:
         import cv2
@@ -145,18 +117,6 @@ def _load_cv2() -> Any:
         ) from exc
 
     return cv2
-
-
-def _screen_size() -> tuple[int, int]:
-    try:
-        import pyautogui
-    except ImportError as exc:
-        raise RuntimeError(
-            "PyAutoGUI is required to determine the screen size. Install pyautogui."
-        ) from exc
-
-    width, height = pyautogui.size()
-    return int(width), int(height)
 
 
 __all__ = ["main"]
