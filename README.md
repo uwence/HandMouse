@@ -13,7 +13,7 @@ Windows-native Python prototype for controlling the mouse with webcam-based hand
 | Camera | 1280×720 default | **640×480**, DSHOW→MSMF→ANY, buffer=1 |
 | Hand pose errors | ignored | palm-open required for engagement |
 
-76/76 tests pass. See `docs/research/handmouse-v2-design.md` for the design rationale.
+93/93 tests pass. See `docs/research/handmouse-v2-design.md` for the design rationale.
 
 ## Windows Setup
 
@@ -42,6 +42,7 @@ $env:HANDMOUSE_MODEL_PATH = "C:\path\to\hand_landmarker.task"
 | Key | Action |
 |---|---|
 | `m` | Toggle ACTIVE / IDLE (engage or disengage mouse control) |
+| `Right Ctrl` | Hold-to-move clutch; pointer movement is allowed only while held and a valid move pose is active |
 | `q` | Quit immediately |
 
 ## State machine
@@ -67,18 +68,21 @@ $env:HANDMOUSE_MODEL_PATH = "C:\path\to\hand_landmarker.task"
 
 You can use **either** keyboard activation (`m`) **or** palm-show activation (open palm held for ~200ms), **or both**. The FSM `OR`s them: any one of the two trigger paths engages ACTIVE.
 
-### 1. Pointer movement (active in ACTIVE)
+### 1. Pointer movement (active in ACTIVE, and only while holding `Right Ctrl`)
 
 - **Control point**: index fingertip
 - **Reference frame**: camera frame, with a default control region of 12%–88% horizontal × 10%–90% vertical (the orange rectangle in the overlay)
 - **Output**: relative pixel delta applied to the system cursor via PyAutoGUI
+- **Clutch**: hold `Right Ctrl`, then show the move pose (index + middle finger extended) until `Move mode` becomes `ACTIVE`
 
 What you should feel:
 
+- Without holding `Right Ctrl` → no real cursor movement, even if the hand is visible
 - Slow, small index-tip movement → slow, precise cursor (gain ~1.0, 0–1 palm-width/s)
 - Fast, large index-tip movement → fast, large cursor jumps (gain ramps up to ~3.0 above 3 palm-width/s)
 - Hand moves closer to the camera → cursor becomes less sensitive (depth compensation via palm-width normalization)
 - Sub-`v_jitter` (0.20 palm-width/s) movement is suppressed — this is your rest tolerance for hand tremor
+- Releasing `Right Ctrl` → movement stops immediately
 
 ### 2. Left click (release-to-commit pinch)
 
@@ -125,15 +129,17 @@ The OpenCV window shows two things in addition to the camera feed:
 ### Top-left status panel (9 lines)
 
 ```
-Mode: ACTIVE | DEBUG                              <- whether pointer injects into OS
-Engagement: ACTIVE (active=yes, reason=hotkey)     <- FSM state + activation reason
+Mode: ACTIVE | DEBUG                                <- whether pointer injects into OS
+Engagement: ACTIVE (active=yes, reason=hotkey)      <- FSM state + activation reason
+Clutch: DOWN                                        <- `Right Ctrl` clutch state
+Move mode: ACTIVE pose=yes                          <- move-mode gate state
 Pointer: state=ACTIVE v=1.23 gain=1.45 depth=0.87  <- pointer engine telemetry
 Pinch: state=PINCH_HOLD d=0.038 (close=0.050 ...)  <- current pinch distance + thresholds
 Grab: state=DRAGGING active=yes scroll=-7          <- grab scroll state
-FPS: 58.3                                           <- end-to-end frame rate
-Frame age: 16 ms                                    <- time from camera to debug draw
-Backend: CAP_DSHOW                                  <- which OpenCV backend is in use
-Hand: Right (0.92)                                  <- handedness + confidence
+FPS: 58.3                                          <- end-to-end frame rate
+Frame age: 16 ms                                   <- time from camera to debug draw
+Backend: CAP_DSHOW                                 <- which OpenCV backend is in use
+Hand: Right (0.92)                                 <- handedness + confidence
 ```
 
 ### Bottom-left pinch threshold bar
@@ -186,6 +192,7 @@ All thresholds are dataclass fields. Edit `src/handmouse/config.py` (for camera 
 
 - App starts in **IDLE**. Real mouse control is OFF until you press `m` (or hold an open palm for 200ms).
 - `m` toggles ACTIVE / IDLE.
+- Pointer movement also requires holding `Right Ctrl`; ACTIVE alone is not enough.
 - `q` exits immediately.
 - PyAutoGUI failsafe is enabled — moving the system cursor to a screen corner aborts the loop.
 - After 4 consecutive frames with no hand detected → automatic COOLDOWN 100ms → IDLE.
@@ -200,7 +207,7 @@ All thresholds are dataclass fields. Edit `src/handmouse/config.py` (for camera 
 | Pointer drifts even when hand is still | Increase `PointerEngineConfig.v_jitter` (default 0.20). If drifting only when hand moves in z, increase `z_min` (less depth correction = less z sensitivity). |
 | Pinch fires too easily / not at all | Adjust `GestureConfig.pinch_close` (lower = easier press) and `pinch_open` (lower = easier release). |
 | Grab scroll fires while just opening my hand | Make the grab pose more obviously closed — at least 2 fingers visibly curled past ratio 1.65. Or increase `min_curled_fingers` from 2 to 3. |
-| App starts clicking / moving cursor without me | Press `m` to go IDLE, then `q` to quit. Check engagement reason in overlay: if it shows `palm_hold`, your resting hand is being mistaken for a palm. Try keyboard-only activation by holding the hand as a fist. |
+| App starts clicking / moving cursor without me | Press `m` to go IDLE, then `q` to quit. Check engagement reason in overlay: if it shows `palm_hold`, your resting hand is being mistaken for a palm. Movement should still require `Right Ctrl`; if it does not, the clutch listener failed and should be debugged. |
 | FPS is below 30 | Check `Backend` line. If it says `CAP_ANY`, edit `config.py` to put `CAP_DSHOW` first. If FPS is still low at 640×480, your CPU is too slow for MediaPipe — there is no further v2 optimization to apply without switching hardware. |
 | Cursor jumps in big jumps when re-engaging | This is the pointer engine re-anchoring on the new index-tip position. Expected. Keep your hand in roughly the same position before and after pressing `m`. |
 
@@ -211,6 +218,8 @@ src/handmouse/
 ├── camera.py             Camera with DSHOW→MSMF→ANY preference, buffer=1, fps=60
 ├── hand_tracker.py       MediaPipe HandLandmarker in VIDEO mode, detect_for_video(ms)
 ├── pointer_engine.py     Relative pointer: adaptive gain + depth comp + dead zone
+├── clutch_input.py       Global clutch listener, defaulting to `Right Ctrl`
+├── move_mode.py          NEUTRAL/ARMED/ACTIVE gate for hold-to-move
 ├── engagement.py         IDLE/ARMED/ACTIVE/COOLDOWN state machine
 ├── gesture_detector.py   Pinch with release-to-commit, double threshold
 ├── grab_scroll_detector.py  Grab+move=scroll, release=stop

@@ -24,7 +24,7 @@ class PointerEngineConfig:
     z_min: float = 0.70
     z_max: float = 1.25
     z_scale_reference: float | None = None
-    dead_zone_radius: float = 0.20
+    dead_zone_radius: float = 0.0
     missing_frames_to_idle: int = 4
     pixel_per_palm_width: float | None = None
 
@@ -55,6 +55,9 @@ class PointerEngine:
 
         if config.pixel_per_palm_width is not None and config.pixel_per_palm_width <= 0:
             raise ValueError("pixel_per_palm_width must be positive")
+
+        if config.dead_zone_radius < 0:
+            raise ValueError("dead_zone_radius must be non-negative")
 
         self.config = config
         self._state = PointerEngineState.IDLE
@@ -183,7 +186,10 @@ class PointerEngine:
         return self._clamp(raw, self.config.z_min, self.config.z_max)
 
     def _gain_for_velocity(self, velocity: float, displacement: float) -> float:
-        if displacement < self.config.dead_zone_radius or velocity < self.config.v_jitter:
+        if (
+            self.config.dead_zone_radius > 0
+            and displacement < self.config.dead_zone_radius
+        ) or velocity < self.config.v_jitter:
             return 0.0
 
         if velocity < self.config.v_mid:

@@ -46,6 +46,9 @@ class DebugTelemetry:
     pointer: PointerEngine | None = None
     engagement: EngagementResult | None = None
     grab_scroll: Any | None = None
+    clutch_down: bool | None = None
+    move_mode: str | None = None
+    move_pose: bool | None = None
 
 
 class DebugView:
@@ -264,10 +267,27 @@ class DebugView:
             if telemetry is not None and telemetry.backend_name is not None
             else "n/a"
         )
+        clutch = (
+            "DOWN"
+            if telemetry is not None and telemetry.clutch_down
+            else "UP"
+        )
+        move_mode = (
+            telemetry.move_mode
+            if telemetry is not None and telemetry.move_mode is not None
+            else "n/a"
+        )
+        move_pose = (
+            "yes"
+            if telemetry is not None and telemetry.move_pose
+            else "no"
+        )
 
         lines = [
             f"Mode: {'CONTROL' if control_enabled else 'DEBUG'}",
             f"Engagement: {engagement_state} (active={engagement_active}, reason={engagement_reason})",
+            f"Clutch: {clutch}",
+            f"Move mode: {move_mode} pose={move_pose}",
             f"Pointer: state={pointer_state} v={pointer_velocity} gain={pointer_gain} depth={pointer_depth} scale={pointer_hand_scale}",
             f"Pinch: state={_gesture_state_name(gesture_result)} d={pinch_distance} (close=0.050 open=0.075)",
             f"Grab: state={grab_state} active={grab_active} scroll={grab_scroll}",

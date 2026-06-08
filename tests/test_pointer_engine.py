@@ -98,6 +98,19 @@ def test_jitter_below_threshold_outputs_zero_delta() -> None:
     assert engine.state is PointerEngineState.ACTIVE
 
 
+def test_small_motion_above_velocity_threshold_is_not_blocked_by_displacement() -> None:
+    engine = make_engine(screen_width=100, screen_height=100, z_scale_reference=0.2)
+
+    assert engine.update(make_hand_result(scale=0.2, index_tip=FramePoint(0.0, 0.0)), now_ms=0) is None
+
+    delta = engine.update(make_hand_result(scale=0.2, index_tip=FramePoint(0.05, 0.0)), now_ms=100)
+
+    assert delta is not None
+    assert delta.dx > 0
+    assert engine.last_gain is not None
+    assert 0.0 < engine.last_gain < 1.0
+
+
 def test_mid_speed_approximate_one_to_one() -> None:
     engine = make_engine(screen_width=100, screen_height=100, z_scale_reference=0.2)
 

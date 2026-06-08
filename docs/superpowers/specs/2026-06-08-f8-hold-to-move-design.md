@@ -1,7 +1,7 @@
-# HandMouse F8 Hold-to-Move Design
+# HandMouse Right Ctrl Hold-to-Move Design
 
 Date: 2026-06-08
-Status: Draft for implementation planning
+Status: Implemented and validated after user testing
 
 ## Goal
 
@@ -9,10 +9,10 @@ Reduce the current false-trigger rate by separating pointer movement from click 
 
 This design only changes the movement interaction:
 
-- Holding `F8` becomes the explicit clutch for mouse movement.
-- While `F8` is held, the system may enter movement mode if a valid move pose is visible.
+- Holding `Right Ctrl` becomes the explicit clutch for mouse movement.
+- While `Right Ctrl` is held, the system may enter movement mode if a valid move pose is visible.
 - While movement mode is active, click, grab-scroll, and swipe shortcuts are disabled.
-- Releasing `F8` exits movement mode immediately, without depending on pose transitions.
+- Releasing `Right Ctrl` exits movement mode immediately, without depending on pose transitions.
 
 The purpose is to stop the current failure mode seen in testing videos: the cursor continues moving while the user is trying to perform a click gesture.
 
@@ -36,21 +36,21 @@ The root issue is not just threshold tuning. The problem is that movement curren
 
 Introduce an explicit movement clutch:
 
-- `F8` is the only movement enable key.
-- Movement is permitted only while `F8` is physically held down.
+- `Right Ctrl` is the movement enable key in the validated implementation.
+- Movement is permitted only while `Right Ctrl` is physically held down.
 - Movement uses a dedicated move pose.
-- Pointer updates are ignored when `F8` is not held.
-- Gesture detectors that can conflict with movement are suppressed while `F8` is held and movement is active.
+- Pointer updates are ignored when `Right Ctrl` is not held.
+- Gesture detectors that can conflict with movement are suppressed while `Right Ctrl` is held and movement is active.
 
 This turns movement into an intentional, temporary mode rather than the default interpretation of any valid hand.
 
-## Why F8
+## Why Right Ctrl
 
-`F8` is preferred over `Ctrl`, `Alt`, or `Shift` because:
+Initial design work used `F8`, but validation on the target machine showed that `Right Ctrl` is the more usable clutch key in practice:
 
-- it has low collision risk with common application shortcuts,
-- it is not a modifier key that would leak into foreground apps as `Ctrl+Click` or `Ctrl+Scroll`,
-- it is easy to explain: hold `F8` to move, release to stop.
+- it feels more natural to hold continuously during movement,
+- it behaved more smoothly than `F8` during live testing,
+- once the listener was changed to suppress and track the key at the Windows hook layer, the foreground-app leakage problem became manageable.
 
 This design assumes the implementation will move from OpenCV window-local key reads toward a global Windows key listener. Otherwise the clutch only works while the debug window has focus, which is not acceptable for real use.
 
@@ -58,7 +58,7 @@ This design assumes the implementation will move from OpenCV window-local key re
 
 ### Neutral
 
-Default state when `F8` is not held.
+Default state when `Right Ctrl` is not held.
 
 - No real pointer movement.
 - No entry into movement mode.
@@ -67,7 +67,7 @@ Default state when `F8` is not held.
 
 ### Move Armed
 
-Intermediate state entered when `F8` is held and a valid move pose is detected.
+Intermediate state entered when `Right Ctrl` is held and a valid move pose is detected.
 
 - Requires a short stability window before enabling real pointer movement.
 - Recommended dwell: `120-200 ms`.
@@ -75,12 +75,12 @@ Intermediate state entered when `F8` is held and a valid move pose is detected.
 
 ### Move Active
 
-Entered after `F8` is held and the move pose stays stable through the arming window.
+Entered after `Right Ctrl` is held and the move pose stays stable through the arming window.
 
 - Pointer movement is enabled.
 - Click, grab-scroll, and swipe actions are disabled.
-- Pointer updates continue only while `F8` remains held.
-- Releasing `F8` exits immediately to `Neutral`.
+- Pointer updates continue only while `Right Ctrl` remains held.
+- Releasing `Right Ctrl` exits immediately to `Neutral`.
 
 The move pose itself may drift slightly during motion; the system should not require the user to perfectly freeze the pose once active. The exit condition is key release, not pose disappearance.
 
@@ -89,18 +89,18 @@ The move pose itself may drift slightly during motion; the system should not req
 ```mermaid
 stateDiagram-v2
   [*] --> Neutral
-  Neutral --> MoveArmed: F8 held + valid move pose
+  Neutral --> MoveArmed: Right Ctrl held + valid move pose
   MoveArmed --> MoveActive: pose stable for dwell window
-  MoveArmed --> Neutral: F8 released or pose lost before dwell completes
-  MoveActive --> Neutral: F8 released
-  MoveActive --> MoveArmed: F8 held + pose becomes invalid briefly
+  MoveArmed --> Neutral: Right Ctrl released or pose lost before dwell completes
+  MoveActive --> Neutral: Right Ctrl released
+  MoveActive --> MoveArmed: Right Ctrl held + pose becomes invalid briefly
   MoveArmed --> MoveActive: pose re-stabilizes
 ```
 
 Notes:
 
-- `F8 released` is the authoritative exit path.
-- Brief pose instability while `F8` is still held should not immediately trigger click or grab. It should either stay in `MoveActive` with movement paused briefly, or fall back to `MoveArmed`.
+- `Right Ctrl released` is the authoritative exit path.
+- Brief pose instability while `Right Ctrl` is still held should not immediately trigger click or grab. It should either stay in `MoveActive` with movement paused briefly, or fall back to `MoveArmed`.
 - No other gesture mode may activate during `MoveArmed` or `MoveActive`.
 
 ## Move Pose
@@ -112,13 +112,13 @@ Current preferred direction:
 - two-finger move pose using index + middle finger extended,
 - other fingers folded enough to distinguish it from open-palm and grab-like poses.
 
-This is not selected because it is inherently perfect. It is selected because it is explicit enough to serve as a gated mode entry signal once paired with `F8`.
+This is not selected because it is inherently perfect. It is selected because it is explicit enough to serve as a gated mode entry signal once paired with the clutch key.
 
 The important design rule is:
 
 - the move pose is used to authorize entry into movement mode,
-- `F8` is used to hold the mode open,
-- mode exit is controlled by `F8 release`, not by waiting for the pose to fully disappear.
+- `Right Ctrl` is used to hold the mode open,
+- mode exit is controlled by `Right Ctrl` release, not by waiting for the pose to fully disappear.
 
 ## Pointer Behavior Inside Move Active
 
@@ -138,7 +138,7 @@ The current `cv2.waitKey()` approach is insufficient for this design because it 
 Implementation requirements:
 
 - use a Windows-capable global key listener,
-- track `F8` press and release transitions,
+- track `Right Ctrl` press and release transitions,
 - keep the clutch key private to the app as much as possible,
 - make failure behavior obvious in debug output if the listener is unavailable.
 
@@ -157,7 +157,7 @@ This is required because debugging ambiguous gesture systems without state telem
 ## Safety Rules
 
 - App still starts non-moving.
-- `F8` release must always stop movement immediately.
+- `Right Ctrl` release must always stop movement immediately.
 - If the hand is lost during `MoveActive`, movement stops but the system must not reinterpret that transition as click or grab.
 - PyAutoGUI failsafe behavior remains enabled.
 
@@ -165,9 +165,9 @@ This is required because debugging ambiguous gesture systems without state telem
 
 This design is successful when:
 
-- holding `F8` and showing the move pose enables movement,
-- releasing `F8` stops movement immediately,
-- attempting a click while not holding `F8` no longer causes concurrent pointer drift from the movement channel,
+- holding `Right Ctrl` and showing the move pose enables movement,
+- releasing `Right Ctrl` stops movement immediately,
+- attempting a click while not holding `Right Ctrl` no longer causes concurrent pointer drift from the movement channel,
 - movement mode does not emit click, scroll, or swipe actions,
 - the feature works while another foreground application has focus.
 
