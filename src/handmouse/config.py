@@ -1,11 +1,17 @@
 from dataclasses import dataclass
 
 
+SUPPORTED_BACKENDS: tuple[str, ...] = ("CAP_DSHOW", "CAP_MSMF", "CAP_ANY")
+
+
 @dataclass(frozen=True)
 class CameraConfig:
     width: int
     height: int
     index: int
+    backend_preference: tuple[str, ...] = SUPPORTED_BACKENDS
+    buffer_size: int = 1
+    fps_target: int = 60
 
 
 @dataclass(frozen=True)
@@ -65,7 +71,14 @@ class AppConfig:
 
 
 DEFAULT_CONFIG = AppConfig(
-    camera=CameraConfig(width=1280, height=720, index=0),
+    camera=CameraConfig(
+        width=640,
+        height=480,
+        index=0,
+        backend_preference=SUPPORTED_BACKENDS,
+        buffer_size=1,
+        fps_target=60,
+    ),
     pointer=PointerConfig(
         smoothing=0.35,
         dead_zone_px=4.0,

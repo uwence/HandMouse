@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from handmouse.config import DEFAULT_CONFIG, AppConfig
+from handmouse.engagement import EngagementResult
 from handmouse.gesture_detector import GestureResult, GestureState
 from handmouse.hand_tracker import HandTrackingResult
-from handmouse.pointer_mapper import FramePoint, ScreenPoint
+from handmouse.pointer_engine import PointerEngine
+from handmouse.pointer_mapper import FramePoint
 
 
 HAND_CONNECTIONS: tuple[tuple[int, int], ...] = (
@@ -33,7 +36,23 @@ HAND_CONNECTIONS: tuple[tuple[int, int], ...] = (
 )
 
 
+@dataclass(frozen=True)
+class DebugTelemetry:
+    """Optional runtime stats to overlay on the debug view."""
+
+    fps: float
+    frame_age_ms: int | None
+    backend_name: str | None
+    pointer: PointerEngine | None = None
+    engagement: EngagementResult | None = None
+    grab_scroll: Any | None = None
+
+
 class DebugView:
+    PINCH_BAR_MAX_DISTANCE = 0.15
+    PINCH_CLOSE_THRESHOLD = 0.05
+    PINCH_OPEN_THRESHOLD = 0.075
+
     def __init__(self, config: AppConfig = DEFAULT_CONFIG) -> None:
         self.config = config
 
@@ -41,10 +60,9 @@ class DebugView:
         self,
         frame: Any,
         hand_result: HandTrackingResult | None,
-        pointer_result: ScreenPoint | FramePoint | Any | None,
         gesture_result: GestureResult | None,
         control_enabled: bool,
-        fps: float,
+        telemetry: DebugTelemetry | None = None,
     ) -> Any:
         cv2 = _load_cv2()
         width, height = _frame_dimensions(frame)
@@ -52,15 +70,16 @@ class DebugView:
         self._draw_landmarks(cv2, frame, hand_result, width, height)
         self._draw_control_region(cv2, frame, width, height)
         self._draw_raw_index_tip(cv2, frame, hand_result, width, height)
-        self._draw_pointer_target(cv2, frame, pointer_result, width, height)
+        self._draw_pointer_target(cv2, frame, telemetry, width, height)
         self._draw_status_panel(
             cv2,
             frame,
             hand_result,
             gesture_result,
             control_enabled,
-            fps,
+            telemetry,
         )
+        self._draw_pinch_bar(cv2, frame, gesture_result, height)
 
         return frame
 
@@ -154,22 +173,16 @@ class DebugView:
         self,
         cv2: Any,
         frame: Any,
-        pointer_result: ScreenPoint | FramePoint | Any | None,
+        telemetry: DebugTelemetry | None,
         width: int,
         height: int,
     ) -> None:
-        point = _extract_pointer_point(pointer_result)
-        if point is None:
+        if telemetry is None or telemetry.pointer is None:
             return
-
-        if isinstance(point, ScreenPoint):
-            _draw_screen_point_text(cv2, frame, point, height)
+        last_point = telemetry.pointer.last_frame_point
+        if last_point is None:
             return
-
-        pixel = _point_to_pixel(point, width, height)
-        if pixel is None:
-            return
-
+        pixel = _normalized_point_to_pixel(last_point, width, height)
         cv2.drawMarker(
             frame,
             pixel,
@@ -181,7 +194,7 @@ class DebugView:
         )
         cv2.putText(
             frame,
-            "target",
+            "pointer",
             (pixel[0] + 10, pixel[1] + 18),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
@@ -197,23 +210,112 @@ class DebugView:
         hand_result: HandTrackingResult | None,
         gesture_result: GestureResult | None,
         control_enabled: bool,
-        fps: float,
+        telemetry: DebugTelemetry | None,
     ) -> None:
+        engagement_state = (
+            telemetry.engagement.state.name
+            if telemetry is not None and telemetry.engagement is not None
+            else "n/a"
+        )
+        engagement_active = (
+            "yes"
+            if telemetry is not None
+            and telemetry.engagement is not None
+            and telemetry.engagement.is_active
+            else "no"
+        )
+        engagement_reason = (
+            telemetry.engagement.reason
+            if telemetry is not None and telemetry.engagement is not None
+            else "n/a"
+        )
+
+        pointer_velocity = (
+            f"{telemetry.pointer.last_velocity:.2f}"
+            if telemetry is not None
+            and telemetry.pointer is not None
+            and telemetry.pointer.last_velocity is not None
+            else "n/a"
+        )
+        pointer_gain = (
+            f"{telemetry.pointer.last_gain:.2f}"
+            if telemetry is not None
+            and telemetry.pointer is not None
+            and telemetry.pointer.last_gain is not None
+            else "n/a"
+        )
+        pointer_depth = (
+            f"{telemetry.pointer.last_depth_factor:.2f}"
+            if telemetry is not None
+            and telemetry.pointer is not None
+            and telemetry.pointer.last_depth_factor is not None
+            else "n/a"
+        )
+        pointer_hand_scale = (
+            f"{telemetry.pointer.last_hand_scale:.3f}"
+            if telemetry is not None
+            and telemetry.pointer is not None
+            and telemetry.pointer.last_hand_scale is not None
+            else "n/a"
+        )
+        pointer_state = (
+            telemetry.pointer.state.name
+            if telemetry is not None and telemetry.pointer is not None
+            else "n/a"
+        )
+
+        pinch_distance = (
+            f"{gesture_result.pinch_distance:.3f}"
+            if gesture_result is not None and gesture_result.pinch_distance is not None
+            else "n/a"
+        )
+
+        grab_state = (
+            telemetry.grab_scroll.state.name
+            if telemetry is not None and telemetry.grab_scroll is not None
+            else "n/a"
+        )
+        grab_active = (
+            "yes"
+            if telemetry is not None
+            and telemetry.grab_scroll is not None
+            and telemetry.grab_scroll.active
+            else "no"
+        )
+        grab_scroll = (
+            str(telemetry.grab_scroll.scroll_delta)
+            if telemetry is not None and telemetry.grab_scroll is not None
+            else "n/a"
+        )
+
+        fps_value = telemetry.fps if telemetry is not None else 0.0
+        frame_age = (
+            f"{telemetry.frame_age_ms} ms"
+            if telemetry is not None and telemetry.frame_age_ms is not None
+            else "n/a"
+        )
+        backend = (
+            telemetry.backend_name
+            if telemetry is not None and telemetry.backend_name is not None
+            else "n/a"
+        )
+
         lines = [
             f"Mode: {'CONTROL' if control_enabled else 'DEBUG'}",
-            f"Gesture: {_gesture_state_name(gesture_result)}",
-            f"Action: {_gesture_action_name(gesture_result)}",
-            f"Active: {_active_state(gesture_result)}",
-            f"Scroll: {_scroll_delta(gesture_result)}",
-            f"FPS: {fps:.1f}",
-            f"Pinch: {_pinch_distance(gesture_result)}",
+            f"Engagement: {engagement_state} (active={engagement_active}, reason={engagement_reason})",
+            f"Pointer: state={pointer_state} v={pointer_velocity} gain={pointer_gain} depth={pointer_depth} scale={pointer_hand_scale}",
+            f"Pinch: state={_gesture_state_name(gesture_result)} d={pinch_distance} (close=0.050 open=0.075)",
+            f"Grab: state={grab_state} active={grab_active} scroll={grab_scroll}",
+            f"FPS: {fps_value:.1f}",
+            f"Frame age: {frame_age}",
+            f"Backend: {backend}",
             f"Hand: {_hand_info(hand_result)}",
         ]
 
         x = 14
         y = 28
-        line_height = 24
-        panel_width = max(250, max(len(line) for line in lines) * 12)
+        line_height = 22
+        panel_width = max(380, max(len(line) for line in lines) * 11)
         panel_height = line_height * len(lines) + 16
 
         overlay = frame.copy()
@@ -228,11 +330,57 @@ class DebugView:
                 line,
                 (x, y + index * line_height),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.62,
+                0.55,
                 color,
                 2,
                 cv2.LINE_AA,
             )
+
+    def _draw_pinch_bar(
+        self,
+        cv2: Any,
+        frame: Any,
+        gesture_result: GestureResult | None,
+        height: int,
+    ) -> None:
+        if gesture_result is None or gesture_result.pinch_distance is None:
+            return
+
+        distance = gesture_result.pinch_distance
+        bar_x = 14
+        bar_y = max(60, height - 40)
+        bar_w = 280
+        bar_h = 14
+
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (40, 40, 40), -1)
+
+        normalized = min(max(distance / self.PINCH_BAR_MAX_DISTANCE, 0.0), 1.0)
+        fill_w = int(bar_w * normalized)
+
+        close_x = bar_x + int(bar_w * (self.PINCH_CLOSE_THRESHOLD / self.PINCH_BAR_MAX_DISTANCE))
+        cv2.line(frame, (close_x, bar_y - 4), (close_x, bar_y + bar_h + 4), (80, 255, 120), 2)
+
+        open_x = bar_x + int(bar_w * (self.PINCH_OPEN_THRESHOLD / self.PINCH_BAR_MAX_DISTANCE))
+        cv2.line(frame, (open_x, bar_y - 4), (open_x, bar_y + bar_h + 4), (80, 180, 255), 2)
+
+        if distance < self.PINCH_CLOSE_THRESHOLD:
+            fill_color = (80, 255, 120)
+        elif distance < self.PINCH_OPEN_THRESHOLD:
+            fill_color = (80, 200, 255)
+        else:
+            fill_color = (180, 180, 180)
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + fill_w, bar_y + bar_h), fill_color, -1)
+
+        cv2.putText(
+            frame,
+            "pinch d",
+            (bar_x, bar_y - 6),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (220, 220, 220),
+            1,
+            cv2.LINE_AA,
+        )
 
 
 def _load_cv2() -> Any:
@@ -273,67 +421,6 @@ def _index_tip(hand_result: HandTrackingResult | None) -> FramePoint | None:
     return None
 
 
-def _extract_pointer_point(pointer_result: ScreenPoint | FramePoint | Any | None) -> Any | None:
-    if pointer_result is None:
-        return None
-
-    for attr in ("target_frame_point", "smoothed_frame_point", "frame_point", "target", "point"):
-        value = getattr(pointer_result, attr, None)
-        if value is not None:
-            return value
-
-    return pointer_result
-
-
-def _point_to_pixel(point: Any, width: int, height: int) -> tuple[int, int] | None:
-    if isinstance(point, FramePoint):
-        return _normalized_point_to_pixel(point, width, height)
-
-    x = getattr(point, "x", None)
-    y = getattr(point, "y", None)
-    if x is None or y is None:
-        return None
-
-    try:
-        x_float = float(x)
-        y_float = float(y)
-    except (TypeError, ValueError):
-        return None
-
-    if 0.0 <= x_float <= 1.0 and 0.0 <= y_float <= 1.0:
-        return _normalized_xy_to_pixel(x_float, y_float, width, height)
-
-    return (
-        _clamp_int(round(x_float), 0, width - 1),
-        _clamp_int(round(y_float), 0, height - 1),
-    )
-
-
-def _draw_screen_point_text(cv2: Any, frame: Any, point: ScreenPoint, height: int) -> None:
-    text = f"target screen: {point.x}, {point.y}"
-    origin = (14, max(24, height - 16))
-    cv2.putText(
-        frame,
-        text,
-        origin,
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        (0, 0, 0),
-        3,
-        cv2.LINE_AA,
-    )
-    cv2.putText(
-        frame,
-        text,
-        origin,
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        (255, 80, 255),
-        1,
-        cv2.LINE_AA,
-    )
-
-
 def _normalized_point_to_pixel(point: FramePoint, width: int, height: int) -> tuple[int, int]:
     return _normalized_xy_to_pixel(point.x, point.y, width, height)
 
@@ -360,39 +447,6 @@ def _gesture_state_name(gesture_result: GestureResult | None) -> str:
     return getattr(state, "name", str(state))
 
 
-def _gesture_action_name(gesture_result: Any | None) -> str:
-    action = getattr(gesture_result, "action", None)
-    if action is None:
-        return "n/a"
-
-    return getattr(action, "name", str(action))
-
-
-def _active_state(gesture_result: Any | None) -> str:
-    active = getattr(gesture_result, "active", None)
-    if active is None:
-        return "n/a"
-    return "yes" if active else "no"
-
-
-def _scroll_delta(gesture_result: Any | None) -> str:
-    delta = getattr(gesture_result, "scroll_delta", None)
-    if delta is None:
-        return "n/a"
-    return str(delta)
-
-
-def _pinch_distance(gesture_result: GestureResult | None) -> str:
-    distance = getattr(gesture_result, "pinch_distance", None)
-    if distance is None:
-        return "n/a"
-
-    try:
-        return f"{float(distance):.3f}"
-    except (TypeError, ValueError):
-        return str(distance)
-
-
 def _hand_info(hand_result: HandTrackingResult | None) -> str:
     if hand_result is None:
         return "n/a"
@@ -409,4 +463,4 @@ def _hand_info(hand_result: HandTrackingResult | None) -> str:
     return f"{label} ({float(confidence):.2f})"
 
 
-__all__ = ["DebugView"]
+__all__ = ["DebugTelemetry", "DebugView"]
