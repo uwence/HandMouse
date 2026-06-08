@@ -70,7 +70,6 @@ class DebugView:
         self._draw_landmarks(cv2, frame, hand_result, width, height)
         self._draw_control_region(cv2, frame, width, height)
         self._draw_raw_index_tip(cv2, frame, hand_result, width, height)
-        self._draw_pointer_target(cv2, frame, telemetry, width, height)
         self._draw_status_panel(
             cv2,
             frame,
@@ -165,40 +164,6 @@ class DebugView:
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
             (0, 190, 255),
-            1,
-            cv2.LINE_AA,
-        )
-
-    def _draw_pointer_target(
-        self,
-        cv2: Any,
-        frame: Any,
-        telemetry: DebugTelemetry | None,
-        width: int,
-        height: int,
-    ) -> None:
-        if telemetry is None or telemetry.pointer is None:
-            return
-        last_point = telemetry.pointer.last_frame_point
-        if last_point is None:
-            return
-        pixel = _normalized_point_to_pixel(last_point, width, height)
-        cv2.drawMarker(
-            frame,
-            pixel,
-            (255, 80, 255),
-            markerType=cv2.MARKER_CROSS,
-            markerSize=22,
-            thickness=2,
-            line_type=cv2.LINE_AA,
-        )
-        cv2.putText(
-            frame,
-            "pointer",
-            (pixel[0] + 10, pixel[1] + 18),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (255, 80, 255),
             1,
             cv2.LINE_AA,
         )
