@@ -449,10 +449,10 @@ def _run_loop(
             elif not is_active or hand_result.index_tip is None or grab_result.is_grab_pose or now_ms < grab_release_cooldown_until:
                 shortcut_detector.reset()
             else:
-                shortcut_result = shortcut_detector.update(hand_result.index_tip, now_ms, vsign_open=vsign_visible)
+                shortcut_result = shortcut_detector.update(hand_result.index_tip, now_ms, palm_open=palm_visible)
                 if shortcut_result.action is not None:
-                    is_vsign_swipe = shortcut_result.action in (ShortcutAction.SWIPE_UP_VSIGN, ShortcutAction.SWIPE_DOWN_VSIGN)
-                    if not is_vsign_swipe or conf.ACTIVE_CONFIG.gesture_switches.win_d:
+                    is_palm_swipe = shortcut_result.action in (ShortcutAction.SWIPE_LEFT_PALM, ShortcutAction.SWIPE_RIGHT_PALM)
+                    if not is_palm_swipe or conf.ACTIVE_CONFIG.gesture_switches.win_d:
                         shortcut.execute(shortcut_result.action)
         except Exception as exc:
             if _is_failsafe_abort(exc):

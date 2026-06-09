@@ -37,7 +37,7 @@ class ShortcutController:
             backend.scroll(self.SCROLL_AMOUNT)
         elif action == ShortcutAction.SWIPE_DOWN:
             backend.scroll(-self.SCROLL_AMOUNT)
-        elif action in (ShortcutAction.SWIPE_UP_VSIGN, ShortcutAction.SWIPE_DOWN_VSIGN):
+        elif action in (ShortcutAction.SWIPE_LEFT_PALM, ShortcutAction.SWIPE_RIGHT_PALM):
             backend.hotkey("win", "d")
 
     def scroll(self, amount: int) -> None:
