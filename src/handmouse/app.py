@@ -212,6 +212,8 @@ def _run_loop(
     pending_m_press = False
     drag_active = False
     pinch_start_point = None
+    last_frame_time_ms = 0
+    grab_release_cooldown_until = 0
 
     last_applied_config = None
     last_active_state = None
@@ -356,7 +358,8 @@ def _run_loop(
                 shortcut_should_reset = True
             elif is_active and not clutch_snapshot.clutch_down:
                 alt_tab_active = False
-                if alt_tab_detector is not None and config.gesture_switches.alt_tab:
+                import handmouse.app as _app_ref
+                if alt_tab_detector is not None and _app_ref.ACTIVE_CONFIG.gesture_switches.alt_tab:
                     alt_tab_state, is_alt_held = alt_tab_detector.update(hand_result.landmarks, now_ms)
                     if alt_tab_state == AltTabState.ACTIVE or is_alt_held:
                         alt_tab_active = True
@@ -389,7 +392,7 @@ def _run_loop(
                     # Drag & Drop logic
                     if gesture_result.state == GestureState.PINCH_PRESSED:
                         pinch_start_point = index_tip
-                    elif gesture_result.state == GestureState.PINCH_HOLD and config.gesture_switches.drag_drop:
+                    elif gesture_result.state == GestureState.PINCH_HOLD and _app_ref.ACTIVE_CONFIG.gesture_switches.drag_drop:
                         if not drag_active and pinch_start_point is not None and index_tip is not None:
                             dist = ((index_tip.x - pinch_start_point.x) ** 2 + 
                                     (index_tip.y - pinch_start_point.y) ** 2) ** 0.5
@@ -414,12 +417,12 @@ def _run_loop(
                             mouse.left_up()
                             drag_active = False
                         else:
-                            if gesture_result.should_double_click and config.gesture_switches.double_click:
+                            if gesture_result.should_double_click and _app_ref.ACTIVE_CONFIG.gesture_switches.double_click:
                                 mouse.double_click()
                             else:
                                 mouse.left_click()
 
-                    if gesture_result.should_right_click and config.gesture_switches.right_click:
+                    if gesture_result.should_right_click and _app_ref.ACTIVE_CONFIG.gesture_switches.right_click:
                         if drag_active:
                             mouse.left_up()
                             drag_active = False
@@ -437,16 +440,19 @@ def _run_loop(
                 shortcut_should_reset = True
             if is_active and not clutch_snapshot.clutch_down and grab_result.scroll_delta != 0:
                 shortcut.scroll(grab_result.scroll_delta)
+                
+            if grab_result.is_grab_pose:
+                grab_release_cooldown_until = now_ms + 800
 
             if shortcut_should_reset or move_active or clutch_snapshot.clutch_down:
                 shortcut_detector.reset()
-            elif not is_active or hand_result.index_tip is None or grab_result.is_grab_pose:
+            elif not is_active or hand_result.index_tip is None or grab_result.is_grab_pose or now_ms < grab_release_cooldown_until:
                 shortcut_detector.reset()
             else:
                 shortcut_result = shortcut_detector.update(hand_result.index_tip, now_ms, palm_open=palm_visible)
                 if shortcut_result.action is not None:
                     is_palm_swipe = shortcut_result.action in (ShortcutAction.SWIPE_UP_PALM, ShortcutAction.SWIPE_DOWN_PALM)
-                    if not is_palm_swipe or config.gesture_switches.win_d:
+                    if not is_palm_swipe or _app_ref.ACTIVE_CONFIG.gesture_switches.win_d:
                         shortcut.execute(shortcut_result.action)
         except Exception as exc:
             if _is_failsafe_abort(exc):
