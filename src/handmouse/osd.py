@@ -75,29 +75,10 @@ class OSDManager:
             except Exception as e:
                 print(f"Failed to set click-through on OSD: {e}")
 
-        # Create a container frame to act as the "glass" background box
-        # We use #1A1A1A instead of pure black so it doesn't get transparentized
-        box_bg = "#1A1A1A"
-        
-        self._box = tk.Frame(
-            self._root, 
-            bg=box_bg, 
-            bd=0, 
-            highlightbackground="#555555", 
-            highlightthickness=2
-        )
-        self._box.pack(padx=20, pady=20)
-
-        self._text_var = tk.StringVar()
-        self._label = tk.Label(
-            self._box,
-            textvariable=self._text_var,
-            font=("Segoe UI", 32, "bold"),
-            fg="white", # White text
-            bg=box_bg,
-            justify="center"
-        )
-        self._label.pack(padx=30, pady=15)
+        self._canvas = tk.Canvas(self._root, bg="black", highlightthickness=0)
+        self._canvas.pack(padx=20, pady=20)
+        import tkinter.font as tkfont
+        self._font = tkfont.Font(family="Segoe UI", size=32, weight="bold")
         
         self._root.after(50, self._animation_loop)
         self._root.mainloop()
@@ -121,8 +102,8 @@ class OSDManager:
                 self._opacity = max(0.0, max_alpha * (1.0 - progress))
             else:
                 self._opacity = 0.0
-                if self._text_var is not None and self._text_var.get() != "":
-                    self._text_var.set("") # Clear text to prevent artifacts
+                if hasattr(self, '_canvas'):
+                    self._canvas.delete("all")
                 
         try:
             self._root.attributes("-alpha", self._opacity)
@@ -132,6 +113,69 @@ class OSDManager:
         if self._running:
             self._root.after(30, self._animation_loop)
 
+    def _draw_canvas(self, text: str):
+        if not text:
+            self._canvas.delete("all")
+            return
+            
+        # Measure text to determine box size
+        padding_x = 30
+        padding_y = 15
+        text_width = self._font.measure(text)
+        text_height = self._font.metrics("linespace")
+        
+        box_width = text_width + padding_x * 2
+        box_height = text_height + padding_y * 2
+        
+        # Resize canvas to exactly fit the box
+        self._canvas.config(width=box_width, height=box_height)
+        
+        self._canvas.delete("all")
+        
+        # Draw rounded rectangle
+        x1, y1 = 2, 2
+        x2, y2 = box_width - 2, box_height - 2
+        radius = 16
+        points = [
+            x1+radius, y1,
+            x1+radius, y1,
+            x2-radius, y1,
+            x2-radius, y1,
+            x2, y1,
+            x2, y1+radius,
+            x2, y1+radius,
+            x2, y2-radius,
+            x2, y2-radius,
+            x2, y2,
+            x2-radius, y2,
+            x2-radius, y2,
+            x1+radius, y2,
+            x1+radius, y2,
+            x1, y2,
+            x1, y2-radius,
+            x1, y2-radius,
+            x1, y1+radius,
+            x1, y1+radius,
+            x1, y1
+        ]
+        
+        self._canvas.create_polygon(
+            points, 
+            fill="#1A1A1A", 
+            outline="#555555", 
+            width=2, 
+            smooth=True
+        )
+        
+        # Draw text
+        self._canvas.create_text(
+            box_width / 2, box_height / 2,
+            text=text,
+            font=self._font,
+            fill="white",
+            anchor="center"
+        )
+
     def show_text(self, text: str):
         if not self.enabled:
             return
@@ -139,5 +183,5 @@ class OSDManager:
         with self._lock:
             self._current_text = text
             self._last_update_time = time.time()
-            if self._text_var is not None:
-                self._text_var.set(text)
+            if self._root is not None and hasattr(self, '_canvas'):
+                self._draw_canvas(text)
