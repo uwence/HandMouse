@@ -17,7 +17,7 @@ class GrabScrollConfig:
     max_scroll_per_frame: int = 18
     thumb_index_max_distance: float = 1.8
     curled_finger_ratio: float = 1.65
-    min_curled_fingers: int = 2
+    min_curled_fingers: int = 3
     post_release_grace_ms: int = 120
     only_active_when_draging: bool = True
 
