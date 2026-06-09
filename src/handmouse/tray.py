@@ -61,28 +61,80 @@ def start_tray_icon() -> None:
             app.SHOULD_EXIT = True
             icon.stop()
 
-        def run_tray():
-            global _icon
-            initial_image = _create_circle_icon("#6c7086")
-            icon = pystray.Icon(
-                "handmouse",
-                icon=initial_image,
-                title="HandMouse",
-                menu=pystray.Menu(
-                    pystray.MenuItem("Toggle Active/Idle", on_toggle),
-                    pystray.MenuItem("Settings", on_settings),
-                    pystray.MenuItem("About", on_about),
-                    pystray.MenuItem("Exit", on_exit),
-                )
+        initial_image = _create_circle_icon("#6c7086")
+        icon = pystray.Icon(
+            "handmouse",
+            icon=initial_image,
+            title="HandMouse",
+            menu=pystray.Menu(
+                pystray.MenuItem("Toggle Active/Idle", on_toggle),
+                pystray.MenuItem("Settings", on_settings),
+                pystray.MenuItem("About", on_about),
+                pystray.MenuItem("Exit", on_exit),
             )
-            with _tray_lock:
-                _icon = icon
-            icon.run()
+        )
+        _icon = icon
+        
+        ready_event = threading.Event()
+        def setup(icon_obj):
+            ready_event.set()
+            
+        icon.run_detached(setup=setup)
+        # Wait for the tray icon to actually start its message loop
+        ready_event.wait(timeout=2.0)
 
-        # Start in a background thread to prevent blocking main thread / OpenCV
-        t = threading.Thread(target=run_tray, daemon=True)
+def start_tray_icon_blocking() -> None:
+    """Initialize and run the pystray system tray icon in the main thread (blocking)."""
+    global _icon
+    with _tray_lock:
+        if _icon is not None:
+            return
 
-    t.start()
+        def on_toggle(icon, item):
+            from handmouse import app
+            app.PENDING_STATE_TOGGLE = True
+
+        def on_settings(icon, item):
+            open_settings_in_thread()
+
+        def on_about(icon, item):
+            def _msg():
+                root = tk.Tk()
+                root.withdraw()
+                messagebox.showinfo(
+                    "About HandMouse",
+                    "HandMouse V3\n\n"
+                    "Windows hand gesture controller using webcam & MediaPipe.\n"
+                    "Status: Active (Green) / Idle (Gray)\n\n"
+                    "Developed as a premium desktop utility."
+                )
+                try:
+                    root.destroy()
+                except Exception:
+                    pass
+            threading.Thread(target=_msg, daemon=True).start()
+
+        def on_exit(icon, item):
+            from handmouse import app
+            app.SHOULD_EXIT = True
+            icon.stop()
+
+        initial_image = _create_circle_icon("#6c7086")
+        icon = pystray.Icon(
+            "handmouse",
+            icon=initial_image,
+            title="HandMouse",
+            menu=pystray.Menu(
+                pystray.MenuItem("Toggle Active/Idle", on_toggle),
+                pystray.MenuItem("Settings", on_settings),
+                pystray.MenuItem("About", on_about),
+                pystray.MenuItem("Exit", on_exit),
+            )
+        )
+        _icon = icon
+    
+    # Run blocking (must be outside lock so it doesn't deadlock on updates)
+    icon.run()
 
 
 def update_tray_status(is_active: bool) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+import threading
 from typing import Any
 
 from handmouse.camera import Camera
@@ -99,12 +100,6 @@ def main() -> None:
             clutch_status = "FAILED"
             print(f"WARNING: Global clutch input listener failed to start: {exc}")
 
-        try:
-            from handmouse.tray import start_tray_icon
-            start_tray_icon()
-        except Exception as exc:
-            print(f"WARNING: System tray failed to start: {exc}")
-
         camera_reader = CameraReader(camera)
         inference_worker = InferenceWorker(camera_reader, tracker)
         camera_reader.start()
@@ -113,39 +108,69 @@ def main() -> None:
         telemetry_file = None
         if args.record_telemetry:
             telemetry_file = open(args.record_telemetry, "w", encoding="utf-8")
-        try:
-            _run_loop(
-                cv2=cv2,
-                camera=camera,
-                tracker=tracker,
-                pointer=pointer,
-                gesture=gesture,
-                grab_scroll=grab_scroll,
-                shortcut_detector=shortcut_detector,
-                engagement=engagement,
-                mouse=mouse,
-                shortcut=shortcut,
-                debug_view=debug_view,
-                clutch_input=clutch_input,
-                move_mode=move_mode,
-                clutch_status=clutch_status,
-                telemetry_file=telemetry_file,
-                camera_reader=camera_reader,
-                inference_worker=inference_worker,
-                alt_tab_detector=alt_tab_detector,
-            )
-        finally:
+            
+        def run_cv2_app():
             try:
-                from handmouse.tray import stop_tray_icon
-                stop_tray_icon()
-            except Exception:
-                pass
-            if telemetry_file:
-                telemetry_file.close()
-            inference_worker.stop()
-            camera_reader.stop()
-            inference_worker.join(timeout=1.0)
-            camera_reader.join(timeout=1.0)
+                _run_loop(
+                    cv2=cv2,
+                    camera=camera,
+                    tracker=tracker,
+                    pointer=pointer,
+                    gesture=gesture,
+                    grab_scroll=grab_scroll,
+                    shortcut_detector=shortcut_detector,
+                    engagement=engagement,
+                    mouse=mouse,
+                    shortcut=shortcut,
+                    debug_view=debug_view,
+                    clutch_input=clutch_input,
+                    move_mode=move_mode,
+                    clutch_status=clutch_status,
+                    telemetry_file=telemetry_file,
+                    camera_reader=camera_reader,
+                    inference_worker=inference_worker,
+                    alt_tab_detector=alt_tab_detector,
+                )
+            except Exception as e:
+                print(f"Error in HandMouse loop: {e}")
+            finally:
+                try:
+                    from handmouse.tray import stop_tray_icon
+                    stop_tray_icon()
+                except Exception:
+                    pass
+                if telemetry_file:
+                    telemetry_file.close()
+                inference_worker.stop()
+                camera_reader.stop()
+                inference_worker.join(timeout=1.0)
+                camera_reader.join(timeout=1.0)
+        
+        app_thread = threading.Thread(target=run_cv2_app, daemon=True)
+        app_thread.start()
+
+        try:
+            from handmouse.tray import start_tray_icon_blocking
+            start_tray_icon_blocking()
+        except Exception as exc:
+            import traceback
+            err_msg = traceback.format_exc()
+            print(f"WARNING: System tray failed to start: {exc}")
+            
+            # Show a visible error box to the user so we can debug this!
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror(
+                "HandMouse Tray Error", 
+                f"Failed to start system tray icon.\n\nError:\n{exc}\n\nDetails:\n{err_msg}"
+            )
+            root.destroy()
+            
+            # Fallback if tray completely fails
+            while app_thread.is_alive():
+                app_thread.join(1.0)
     finally:
         if "alt_tab_detector" in locals():
             alt_tab_detector.reset()

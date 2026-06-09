@@ -20,35 +20,72 @@ from handmouse.config import (
 )
 
 _gui_lock = threading.Lock()
+import queue
+
+_gui_queue = queue.Queue()
+_gui_thread_started = False
 _gui_window = None
 
+def _start_gui_thread_if_needed():
+    global _gui_thread_started
+    with _gui_lock:
+        if not _gui_thread_started:
+            threading.Thread(target=_gui_thread_worker, daemon=True).start()
+            _gui_thread_started = True
 
 def open_settings_in_thread() -> None:
-    """Open the settings GUI in a separate thread to avoid blocking the main loop."""
-    with _gui_lock:
-        global _gui_window
-        if _gui_window is not None:
-            try:
-                _gui_window.lift()
-                _gui_window.focus_force()
-                return
-            except Exception:
-                _gui_window = None
+    """Request the settings GUI to open via the persistent background thread."""
+    _start_gui_thread_if_needed()
+    _gui_queue.put("SHOW_SETTINGS")
 
-        t = threading.Thread(target=_run_gui, daemon=True)
-        t.start()
+def open_about_in_thread() -> None:
+    """Request the about dialog to open via the persistent background thread."""
+    _start_gui_thread_if_needed()
+    _gui_queue.put("SHOW_ABOUT")
 
+def _gui_thread_worker():
+    root = tk.Tk()
+    root.withdraw() # Hide the root window initially
+    
+    def check_queue():
+        try:
+            while True:
+                msg = _gui_queue.get_nowait()
+                if msg == "SHOW_SETTINGS":
+                    _build_settings_ui(root)
+                elif msg == "SHOW_ABOUT":
+                    _build_about_ui(root)
+        except queue.Empty:
+            pass
+        root.after(100, check_queue)
+        
+    root.after(100, check_queue)
+    root.mainloop()
 
-def _run_gui() -> None:
+def _build_about_ui(root):
+    messagebox.showinfo(
+        "About HandMouse",
+        "HandMouse V3\n\n"
+        "Windows hand gesture controller using webcam & MediaPipe.\n"
+        "Status: Active (Green) / Idle (Gray)\n\n"
+        "Developed as a premium desktop utility.",
+        parent=root
+    )
+
+def _build_settings_ui(root) -> None:
     global _gui_window
     
-    root = tk.Tk()
-    with _gui_lock:
-        _gui_window = root
+    if _gui_window is not None and _gui_window.winfo_exists():
+        _gui_window.lift()
+        _gui_window.focus_force()
+        return
 
-    root.title("HandMouse Settings")
-    root.geometry("450x700")
-    root.resizable(False, False)
+    top = tk.Toplevel(root)
+    _gui_window = top
+
+    top.title("HandMouse Settings")
+    top.geometry("450x700")
+    top.resizable(False, False)
 
     # Configure dark theme colors
     bg_color = "#1e1e2e"       # Catppuccin Mocha base
@@ -96,23 +133,23 @@ def _run_gui() -> None:
     # Load current config
     config = app.ACTIVE_CONFIG
 
-    # Variables
-    camera_idx_var = tk.StringVar(value=str(config.camera.index))
-    mirror_input_var = tk.BooleanVar(value=config.camera.mirror_input)
-    speed_var = tk.DoubleVar(value=config.pointer.g_hi)
-    pinch_close_var = tk.DoubleVar(value=config.gesture_config.pinch_close)
-    pinch_open_var = tk.DoubleVar(value=config.gesture_config.pinch_open)
-    scroll_sens_var = tk.DoubleVar(value=config.grab_scroll_config.scroll_sensitivity)
+    # Variables (MUST use master=top)
+    camera_idx_var = tk.StringVar(master=top, value=str(config.camera.index))
+    mirror_input_var = tk.BooleanVar(master=top, value=config.camera.mirror_input)
+    speed_var = tk.DoubleVar(master=top, value=config.pointer.g_hi)
+    pinch_close_var = tk.DoubleVar(master=top, value=config.gesture_config.pinch_close)
+    pinch_open_var = tk.DoubleVar(master=top, value=config.gesture_config.pinch_open)
+    scroll_sens_var = tk.DoubleVar(master=top, value=config.grab_scroll_config.scroll_sensitivity)
 
     switches = config.gesture_switches
-    rc_var = tk.BooleanVar(value=switches.right_click)
-    dc_var = tk.BooleanVar(value=switches.double_click)
-    dd_var = tk.BooleanVar(value=switches.drag_drop)
-    at_var = tk.BooleanVar(value=switches.alt_tab)
-    wd_var = tk.BooleanVar(value=switches.win_d)
+    rc_var = tk.BooleanVar(master=top, value=switches.right_click)
+    dc_var = tk.BooleanVar(master=top, value=switches.double_click)
+    dd_var = tk.BooleanVar(master=top, value=switches.drag_drop)
+    at_var = tk.BooleanVar(master=top, value=switches.alt_tab)
+    wd_var = tk.BooleanVar(master=top, value=switches.win_d)
 
     # 1. Camera & Pointer Card
-    card1 = create_card(root, "Camera & Speed Configuration")
+    card1 = create_card(top, "Camera & Speed Configuration")
     
     row1 = tk.Frame(card1, bg=card_color)
     row1.pack(fill="x", padx=10, pady=5)
@@ -143,7 +180,7 @@ def _run_gui() -> None:
     speed_scale.pack(side="right", fill="x", expand=True, padx=(10, 5))
 
     # 2. Gesture Switches Card
-    card2 = create_card(root, "Enable / Disable Gestures")
+    card2 = create_card(top, "Enable / Disable Gestures")
     
     grid = tk.Frame(card2, bg=card_color)
     grid.pack(fill="x", padx=10, pady=5)
@@ -155,7 +192,7 @@ def _run_gui() -> None:
     ttk.Checkbutton(grid, text="Win+D Back to Desktop (Palm Swipe)", variable=wd_var).pack(anchor="w", pady=3)
 
     # 3. Gesture Sensitivity Card
-    card3 = create_card(root, "Gesture Sensitivity")
+    card3 = create_card(top, "Gesture Sensitivity")
 
     row3 = tk.Frame(card3, bg=card_color)
     row3.pack(fill="x", padx=10, pady=5)
@@ -209,7 +246,7 @@ def _run_gui() -> None:
     scroll_sens_scale.pack(side="right", fill="x", expand=True, padx=(10, 5))
 
     # Action Buttons
-    btn_frame = tk.Frame(root, bg=bg_color)
+    btn_frame = tk.Frame(top, bg=bg_color)
     btn_frame.pack(fill="x", padx=15, pady=15)
 
     def on_save():
@@ -259,11 +296,14 @@ def _run_gui() -> None:
         # Update running config
         app.ACTIVE_CONFIG = new_config
         
-        messagebox.showinfo("Success", "Configuration saved and applied successfully!")
-        root.destroy()
+        messagebox.showinfo("Success", "Configuration saved and applied successfully!", parent=top)
+        top.destroy()
+        _gui_window = None
 
     def on_cancel():
-        root.destroy()
+        top.destroy()
+        global _gui_window
+        _gui_window = None
 
     # Create beautiful custom action buttons
     # Since ttk buttons are hard to style with round corners, we use canvas or tk.Button with flat styling
@@ -282,10 +322,8 @@ def _run_gui() -> None:
     cancel_btn.pack(side="right")
 
     def _cleanup():
-        with _gui_lock:
-            global _gui_window
-            _gui_window = None
-        root.destroy()
+        global _gui_window
+        _gui_window = None
+        top.destroy()
 
-    root.protocol("WM_DELETE_WINDOW", _cleanup)
-    root.mainloop()
+    top.protocol("WM_DELETE_WINDOW", _cleanup)

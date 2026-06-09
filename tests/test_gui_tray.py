@@ -22,6 +22,9 @@ class MockIcon:
     def run(self) -> None:
         self.run_called = True
 
+    def run_detached(self) -> None:
+        self.run_called = True
+
     def stop(self) -> None:
         self.stop_called = True
 
@@ -105,7 +108,7 @@ def test_gui_run_and_save(monkeypatch: pytest.MonkeyPatch) -> None:
             pass
 
     class MockVar:
-        def __init__(self, value=None) -> None:
+        def __init__(self, value=None, **kwargs) -> None:
             self._val = value
         def get(self):
             return self._val
