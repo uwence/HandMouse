@@ -75,16 +75,29 @@ class OSDManager:
             except Exception as e:
                 print(f"Failed to set click-through on OSD: {e}")
 
+        # Create a container frame to act as the "glass" background box
+        # We use #1A1A1A instead of pure black so it doesn't get transparentized
+        box_bg = "#1A1A1A"
+        
+        self._box = tk.Frame(
+            self._root, 
+            bg=box_bg, 
+            bd=0, 
+            highlightbackground="#555555", 
+            highlightthickness=2
+        )
+        self._box.pack(padx=20, pady=20)
+
         self._text_var = tk.StringVar()
         self._label = tk.Label(
-            self._root,
+            self._box,
             textvariable=self._text_var,
-            font=("Segoe UI", 36, "bold"),
-            fg="#00FFCC", # Cyan text
-            bg=transparent_color,
-            justify="left"
+            font=("Segoe UI", 32, "bold"),
+            fg="white", # White text
+            bg=box_bg,
+            justify="center"
         )
-        self._label.pack(padx=20, pady=20)
+        self._label.pack(padx=30, pady=15)
         
         self._root.after(50, self._animation_loop)
         self._root.mainloop()
@@ -97,12 +110,15 @@ class OSDManager:
             now = time.time()
             time_since_update = now - self._last_update_time
             
+            # The maximum opacity of the entire box (making it look like frosted glass)
+            max_alpha = 0.85
+            
             # Keep visible for 1.2 seconds, then fade out over 1.0 second
             if time_since_update < 1.2:
-                self._opacity = 1.0
+                self._opacity = max_alpha
             elif time_since_update < 2.2:
                 progress = (time_since_update - 1.2) / 1.0
-                self._opacity = max(0.0, 1.0 - progress)
+                self._opacity = max(0.0, max_alpha * (1.0 - progress))
             else:
                 self._opacity = 0.0
                 if self._text_var is not None and self._text_var.get() != "":
