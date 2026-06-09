@@ -14,7 +14,7 @@ class GrabScrollConfig:
     release_grace_ms: int = 120
     dead_zone: float = 0.015
     scroll_sensitivity: float = 180.0
-    max_scroll_per_frame: int = 18
+    max_scroll_per_frame: int = 100
     thumb_index_max_distance: float = 1.8
     curled_finger_ratio: float = 1.65
     min_curled_fingers: int = 3
