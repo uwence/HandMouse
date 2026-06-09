@@ -27,6 +27,7 @@ class AltTabDetector:
         self.state = AltTabState.INACTIVE
         self._arming_start_ms = 0
         self._anchor_x = 0.0
+        self._anchor_y = 0.0
         self._next_nav_ms = 0
 
     def update(self, landmarks: list[FramePoint] | None, now_ms: int) -> tuple[AltTabState, bool]:
@@ -45,8 +46,9 @@ class AltTabDetector:
                 if now_ms - self._arming_start_ms >= self.arming_time_ms:
                     self.state = AltTabState.ACTIVE
                     self._anchor_x = palm_center.x if palm_center else 0.5
+                    self._anchor_y = palm_center.y if palm_center else 0.5
                     self._next_nav_ms = now_ms + self.cooldown_ms
-                    self._press_alt_tab()
+                    self._press_win_tab()
                     return self.state, True
                 return self.state, False
             else:
@@ -57,25 +59,36 @@ class AltTabDetector:
             if is_pose:
                 if palm_center and now_ms >= self._next_nav_ms:
                     dx = palm_center.x - self._anchor_x
-                    if dx > self.nav_threshold:
-                        self._press_tab(forward=True)
+                    dy = palm_center.y - self._anchor_y
+                    
+                    if abs(dx) > self.nav_threshold or abs(dy) > self.nav_threshold:
+                        if abs(dx) > abs(dy):
+                            if dx > self.nav_threshold:
+                                self._press_nav("right")
+                                self._anchor_x = palm_center.x
+                            elif dx < -self.nav_threshold:
+                                self._press_nav("left")
+                                self._anchor_x = palm_center.x
+                        else:
+                            if dy > self.nav_threshold:
+                                self._press_nav("down")
+                                self._anchor_y = palm_center.y
+                            elif dy < -self.nav_threshold:
+                                self._press_nav("up")
+                                self._anchor_y = palm_center.y
+                        
                         self._next_nav_ms = now_ms + self.cooldown_ms
-                        self._anchor_x = palm_center.x
-                    elif dx < -self.nav_threshold:
-                        self._press_tab(forward=False)
-                        self._next_nav_ms = now_ms + self.cooldown_ms
-                        self._anchor_x = palm_center.x
                 return self.state, True
             else:
                 self.state = AltTabState.INACTIVE
-                self._release_alt()
+                self._submit_selection()
                 return self.state, False
 
         return self.state, False
 
     def reset(self) -> None:
         if self.state == AltTabState.ACTIVE:
-            self._release_alt()
+            self._submit_selection()
         self.state = AltTabState.INACTIVE
 
     def _is_alt_tab_pose(self, landmarks: list[FramePoint] | None) -> bool:
@@ -104,31 +117,27 @@ class AltTabDetector:
             sum(landmarks[i].y for i in palm_indices) / len(palm_indices)
         )
 
-    def _press_alt_tab(self) -> None:
+    def _press_win_tab(self) -> None:
         if pyautogui is None:
             return
         try:
-            pyautogui.keyDown("alt")
-            pyautogui.press("tab")
+            pyautogui.hotkey("win", "tab")
         except Exception:
             pass
 
-    def _press_tab(self, forward: bool) -> None:
+    def _press_nav(self, key: str) -> None:
         if pyautogui is None:
             return
         try:
-            if forward:
-                pyautogui.press("tab")
-            else:
-                pyautogui.hotkey("shift", "tab")
+            pyautogui.press(key)
         except Exception:
             pass
 
-    def _release_alt(self) -> None:
+    def _submit_selection(self) -> None:
         if pyautogui is None:
             return
         try:
-            pyautogui.keyUp("alt")
+            pyautogui.press("enter")
         except Exception:
             pass
 

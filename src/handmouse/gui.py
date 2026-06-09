@@ -189,7 +189,7 @@ def _build_settings_ui(root) -> None:
     ttk.Checkbutton(grid, text="Right Click (Thumb + Middle)", variable=rc_var).pack(anchor="w", pady=3)
     ttk.Checkbutton(grid, text="Double Click (Double Pinch)", variable=dc_var).pack(anchor="w", pady=3)
     ttk.Checkbutton(grid, text="Drag & Drop (Pinch + Move)", variable=dd_var).pack(anchor="w", pady=3)
-    ttk.Checkbutton(grid, text="Alt+Tab Window Switcher (3 Fingers)", variable=at_var).pack(anchor="w", pady=3)
+    ttk.Checkbutton(grid, text="Win+Tab Task View (3 Fingers)", variable=at_var).pack(anchor="w", pady=3)
     ttk.Checkbutton(grid, text="Win+D Back to Desktop (Palm Swipe L/R)", variable=wd_var).pack(anchor="w", pady=3)
 
     # 3. Gesture Sensitivity Card
