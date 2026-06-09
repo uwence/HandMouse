@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+import json
 import time
 from typing import Any
 
@@ -15,6 +17,7 @@ from handmouse.grab_scroll_detector import (
     GrabScrollResult,
     GrabScrollState,
 )
+from handmouse.interlock import InteractionInterlock
 from handmouse.hand_tracker import HandTracker
 from handmouse.mouse_controller import MouseController, MouseFailsafeTriggered
 from handmouse.move_mode import (
@@ -32,6 +35,10 @@ WINDOW_NAME = "HandMouse"
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=WINDOW_NAME)
+    parser.add_argument("--record-telemetry", type=str, default=None, help="Path to dump frame telemetry JSONL")
+    args = parser.parse_args()
+
     config = DEFAULT_CONFIG
     cv2 = _load_cv2()
     screen_size = _screen_size()
@@ -44,7 +51,7 @@ def main() -> None:
     tracker: HandTracker | None = None
     mouse = MouseController()
     shortcut = ShortcutController()
-    clutch_input = GlobalClutchInput()
+    clutch_input = GlobalClutchInput(config.clutch.key_name)
 
     try:
         camera.open()
@@ -57,29 +64,45 @@ def main() -> None:
                 control_region=config.pointer.control_region,
             )
         )
-        gesture = GestureDetector(GestureConfig())
-        grab_scroll = GrabScrollDetector(GrabScrollConfig())
+        interlock = InteractionInterlock()
+        gesture = GestureDetector(GestureConfig(), interlock=interlock)
+        grab_scroll = GrabScrollDetector(GrabScrollConfig(), interlock=interlock)
         shortcut_detector = ShortcutDetector(config.shortcut)
         engagement = EngagementFSM(EngagementConfig())
         move_mode = MoveModeController(MoveModeConfig())
         debug_view = DebugView(config)
-        clutch_input.start()
+        
+        try:
+            clutch_input.start()
+            clutch_status = "OK"
+        except Exception as exc:
+            clutch_status = "FAILED"
+            print(f"WARNING: Global clutch input listener failed to start: {exc}")
 
-        _run_loop(
-            cv2=cv2,
-            camera=camera,
-            tracker=tracker,
-            pointer=pointer,
-            gesture=gesture,
-            grab_scroll=grab_scroll,
-            shortcut_detector=shortcut_detector,
-            engagement=engagement,
-            mouse=mouse,
-            shortcut=shortcut,
-            debug_view=debug_view,
-            clutch_input=clutch_input,
-            move_mode=move_mode,
-        )
+        telemetry_file = None
+        if args.record_telemetry:
+            telemetry_file = open(args.record_telemetry, "w", encoding="utf-8")
+        try:
+            _run_loop(
+                cv2=cv2,
+                camera=camera,
+                tracker=tracker,
+                pointer=pointer,
+                gesture=gesture,
+                grab_scroll=grab_scroll,
+                shortcut_detector=shortcut_detector,
+                engagement=engagement,
+                mouse=mouse,
+                shortcut=shortcut,
+                debug_view=debug_view,
+                clutch_input=clutch_input,
+                move_mode=move_mode,
+                clutch_status=clutch_status,
+                telemetry_file=telemetry_file,
+            )
+        finally:
+            if telemetry_file:
+                telemetry_file.close()
     finally:
         mouse.set_control_enabled(False)
         shortcut.set_enabled(False)
@@ -105,6 +128,8 @@ def _run_loop(
     debug_view: DebugView,
     clutch_input: Any | None = None,
     move_mode: Any | None = None,
+    clutch_status: str | None = None,
+    telemetry_file: Any | None = None,
 ) -> None:
     previous_frame_time = time.perf_counter()
     previous_frame_capture_time = previous_frame_time
@@ -174,31 +199,27 @@ def _run_loop(
         )
         move_active = is_active and move_mode_result.movement_enabled
         shortcut_should_reset = False
+        dx, dy = 0.0, 0.0
 
         try:
             if move_active:
                 delta = pointer.update(hand_result, now_ms)
                 if delta is not None and (delta.dx != 0 or delta.dy != 0):
                     mouse.move_relative(delta)
+                    dx = delta.dx
+                    dy = delta.dy
                 gesture_result = gesture.update(None, None, now_ms)
                 grab_scroll.reset()
                 grab_result = _neutral_grab_result()
                 shortcut_should_reset = True
             elif is_active and not clutch_snapshot.clutch_down:
                 pointer.reset()
-                grab_result = grab_scroll.update(hand_result.landmarks, now_ms)
-                pinch_suppressed = (
-                    grab_result.is_grab_pose
-                    or _is_grab_like_hand_pose(hand_result.landmarks)
+                gesture_result = gesture.update(
+                    hand_result.thumb_tip,
+                    hand_result.index_tip,
+                    now_ms,
                 )
-                if pinch_suppressed:
-                    gesture_result = gesture.update(None, None, now_ms)
-                else:
-                    gesture_result = gesture.update(
-                        hand_result.thumb_tip,
-                        hand_result.index_tip,
-                        now_ms,
-                    )
+                grab_result = grab_scroll.update(hand_result.landmarks, now_ms)
                 if gesture_result.should_click:
                     mouse.left_click()
             else:
@@ -239,6 +260,7 @@ def _run_loop(
             engagement=engagement_result,
             grab_scroll=grab_result,
             clutch_down=clutch_snapshot.clutch_down,
+            clutch_status=clutch_status,
             move_mode=move_mode_result.state.name,
             move_pose=move_mode_result.move_pose,
         )
@@ -253,6 +275,20 @@ def _run_loop(
 
         cv2.imshow(WINDOW_NAME, debug_frame)
 
+        if telemetry_file is not None:
+            telemetry_data = {
+                "frame_capture_time": frame_capture_time,
+                "frame_age_ms": frame_age_ms,
+                "pointer_dx": dx,
+                "pointer_dy": dy,
+                "engagement_active": is_active,
+                "click_triggered": gesture_result.should_click,
+                "scroll_delta": grab_result.scroll_delta,
+                "clutch_down": clutch_snapshot.clutch_down,
+                "move_mode": move_mode_result.state.name,
+            }
+            telemetry_file.write(json.dumps(telemetry_data) + "\n")
+            telemetry_file.flush()
 
 def _is_key_pressed_edge(raw_key: int, target: int, last_state: bool) -> bool:
     """Treat any non-zero key match within this frame as a press edge.

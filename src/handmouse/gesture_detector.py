@@ -5,6 +5,7 @@ from enum import Enum, auto
 from math import hypot
 
 from handmouse.pointer_mapper import FramePoint
+from handmouse.interlock import InteractionInterlock, InterlockType
 
 
 @dataclass(frozen=True)
@@ -32,8 +33,9 @@ class GestureResult:
 
 
 class GestureDetector:
-    def __init__(self, config: GestureConfig) -> None:
+    def __init__(self, config: GestureConfig, interlock: InteractionInterlock | None = None) -> None:
         self.config = config
+        self.interlock = interlock
         self._state = GestureState.PINCH_OPEN
         self._close_count = 0
         self._release_count = 0
@@ -50,6 +52,15 @@ class GestureDetector:
             return GestureResult(GestureState.PINCH_OPEN, False, None)
 
         distance = hypot(thumb.x - index.x, thumb.y - index.y)
+
+        wants_active = distance < self.config.pinch_close or self._state != GestureState.PINCH_OPEN
+        if wants_active:
+            if self.interlock and not self.interlock.try_acquire(InterlockType.CLICK):
+                self.reset()
+                return GestureResult(GestureState.PINCH_OPEN, False, distance)
+        else:
+            if self.interlock:
+                self.interlock.release(InterlockType.CLICK)
 
         if self._state == GestureState.COOLDOWN and now_ms < self._cooldown_until_ms:
             return GestureResult(GestureState.COOLDOWN, False, distance)
@@ -70,6 +81,8 @@ class GestureDetector:
         self._close_count = 0
         self._release_count = 0
         self._cooldown_until_ms = 0
+        if self.interlock:
+            self.interlock.release(InterlockType.CLICK)
 
     def _update_open(self, distance: float) -> GestureResult:
         if distance < self.config.pinch_close:

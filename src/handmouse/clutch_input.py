@@ -28,7 +28,7 @@ class ManualClutchInput:
 
 
 class GlobalClutchInput:
-    def __init__(self, key_name: str = "ctrl_r") -> None:
+    def __init__(self, key_name: str) -> None:
         self._pressed = False
         self._lock = Lock()
         self._listener: Any | None = None

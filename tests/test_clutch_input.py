@@ -44,7 +44,7 @@ def test_global_clutch_input_updates_pressed_state(monkeypatch) -> None:
     fake_pynput.keyboard = fake_keyboard
     monkeypatch.setitem(sys.modules, "pynput", fake_pynput)
 
-    clutch = GlobalClutchInput()
+    clutch = GlobalClutchInput("ctrl_r")
     clutch.start()
 
     listener = listener_box["listener"]
@@ -85,7 +85,7 @@ def test_global_clutch_input_suppresses_only_right_ctrl(monkeypatch) -> None:
     fake_pynput.keyboard = fake_keyboard
     monkeypatch.setitem(sys.modules, "pynput", fake_pynput)
 
-    clutch = GlobalClutchInput()
+    clutch = GlobalClutchInput("ctrl_r")
     clutch.start()
 
     listener = listener_box["listener"]
@@ -125,7 +125,7 @@ def test_global_clutch_input_accepts_generic_ctrl_alias(monkeypatch) -> None:
     fake_pynput.keyboard = fake_keyboard
     monkeypatch.setitem(sys.modules, "pynput", fake_pynput)
 
-    clutch = GlobalClutchInput()
+    clutch = GlobalClutchInput("ctrl_r")
     clutch.start()
 
     listener = listener_box["listener"]
@@ -161,7 +161,7 @@ def test_global_clutch_input_tracks_press_and_release_from_win32_filter(monkeypa
     fake_pynput.keyboard = fake_keyboard
     monkeypatch.setitem(sys.modules, "pynput", fake_pynput)
 
-    clutch = GlobalClutchInput()
+    clutch = GlobalClutchInput("ctrl_r")
     clutch.start()
 
     listener = listener_box["listener"]

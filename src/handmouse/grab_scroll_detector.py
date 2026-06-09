@@ -5,6 +5,7 @@ from enum import Enum, auto
 from math import hypot
 
 from handmouse.pointer_mapper import FramePoint
+from handmouse.interlock import InteractionInterlock, InterlockType
 
 
 @dataclass(frozen=True)
@@ -51,8 +52,9 @@ class GrabScrollDetector:
     PINKY_MCP = 17
     PINKY_TIP = 20
 
-    def __init__(self, config: GrabScrollConfig) -> None:
+    def __init__(self, config: GrabScrollConfig, interlock: InteractionInterlock | None = None) -> None:
         self.config = config
+        self.interlock = interlock
         self._state = GrabScrollState.NO_HAND
         self._candidate_started_ms: int | None = None
         self._last_seen_grab_ms: int | None = None
@@ -75,6 +77,18 @@ class GrabScrollDetector:
             return self._handle_missing_hand(now_ms)
 
         is_grab = self._is_grab_pose(landmarks)
+
+        wants_active = is_grab or self._state != GrabScrollState.NO_HAND
+        if wants_active:
+            if self.interlock and not self.interlock.try_acquire(InterlockType.GRAB):
+                self.reset()
+                return self._result(
+                    GrabScrollState.NO_HAND, False, 0, None, None, False
+                )
+        else:
+            if self.interlock:
+                self.interlock.release(InterlockType.GRAB)
+
         if not is_grab:
             return self._handle_non_grab(now_ms)
 
@@ -87,10 +101,14 @@ class GrabScrollDetector:
         self._released_at_ms = None
         self._anchor = None
         self._previous = None
+        if self.interlock:
+            self.interlock.release(InterlockType.GRAB)
 
     def _handle_missing_hand(self, now_ms: int) -> GrabScrollResult:
         if self._last_seen_grab_ms is None and self._released_at_ms is None:
             self._state = GrabScrollState.NO_HAND
+            if self.interlock:
+                self.interlock.release(InterlockType.GRAB)
             return self._result(
                 GrabScrollState.NO_HAND,
                 False,
@@ -115,10 +133,9 @@ class GrabScrollDetector:
 
     def _handle_non_grab(self, now_ms: int) -> GrabScrollResult:
         if self._last_seen_grab_ms is None and self._released_at_ms is None:
-            self._state = GrabScrollState.RELEASED
-            self._begin_release(now_ms)
+            self._state = GrabScrollState.NO_HAND
             return self._result(
-                GrabScrollState.RELEASED,
+                GrabScrollState.NO_HAND,
                 False,
                 0,
                 None,

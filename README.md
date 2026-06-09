@@ -198,6 +198,15 @@ All thresholds are dataclass fields. Edit `src/handmouse/config.py` (for camera 
 - After 4 consecutive frames with no hand detected → automatic COOLDOWN 100ms → IDLE.
 - The system **never** defaults to a state where it outputs mouse events on a heuristic alone.
 
+## 推荐使用姿势和测试流程
+
+1. **启动**：运行 `python -m handmouse.app`
+2. **激活**：按下 `m` 键，或保持张开手掌约 200ms。此时状态变为 `ACTIVE`。
+3. **移动指针**：按住 `Right Ctrl` 键（或配置中指定的 `clutch` 键），并保持食指和中指伸直的“移动”手势。当 `Move mode` 变为 `ACTIVE` 后，移动手指即可控制鼠标。
+4. **点击**：食指与拇指捏合（下方指示条变绿），然后松开（指示条变灰）即可触发左键点击。**必须松开**才会触发点击。
+5. **滚动**：手握拳（抓取手势），保持不动 120ms 进入 `GRABBING` 状态。然后手上下移动，即可像触摸板一样滚动页面。松开恢复。
+6. **调试信息**：留意左上角的 `Clutch: DOWN (hook: OK)`。如果 hook 状态为 FAILED，说明 `pynput` 监听失败。
+
 ## Troubleshooting
 
 | Symptom | Fix |

@@ -47,6 +47,7 @@ class DebugTelemetry:
     engagement: EngagementResult | None = None
     grab_scroll: Any | None = None
     clutch_down: bool | None = None
+    clutch_status: str | None = None
     move_mode: str | None = None
     move_pose: bool | None = None
 
@@ -267,11 +268,12 @@ class DebugView:
             if telemetry is not None and telemetry.backend_name is not None
             else "n/a"
         )
-        clutch = (
-            "DOWN"
-            if telemetry is not None and telemetry.clutch_down
-            else "UP"
-        )
+        if telemetry is not None:
+            c_state = "DOWN" if telemetry.clutch_down else "UP"
+            c_hook = telemetry.clutch_status or "n/a"
+            clutch = f"{c_state} (hook: {c_hook})"
+        else:
+            clutch = "UP (hook: n/a)"
         move_mode = (
             telemetry.move_mode
             if telemetry is not None and telemetry.move_mode is not None

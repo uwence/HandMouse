@@ -262,6 +262,7 @@ def test_main_preserves_startup_error_when_camera_open_fails(monkeypatch: pytest
         def destroyAllWindows(self) -> None:
             return None
 
+    monkeypatch.setattr("sys.argv", ["app.py"])
     monkeypatch.setattr(app_module, "_load_cv2", lambda: DummyCv2())
     monkeypatch.setattr(app_module, "_screen_size", lambda: (1920, 1080))
 
