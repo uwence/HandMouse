@@ -34,6 +34,16 @@ def test_tray_icon_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
         mock_icon_instance = MockIcon(name, icon, title, menu)
         return mock_icon_instance
 
+    class MockThread:
+        def __init__(self, target, **kwargs) -> None:
+            self.target = target
+            self.daemon = kwargs.get("daemon", False)
+        def start(self) -> None:
+            self.target()
+        def join(self, timeout=None) -> None:
+            pass
+
+    monkeypatch.setattr("threading.Thread", MockThread)
     monkeypatch.setattr("pystray.Icon", mock_icon_init)
     monkeypatch.setattr("pystray.Menu", lambda *args: list(args))
     monkeypatch.setattr("pystray.MenuItem", lambda text, action, **kwargs: (text, action))

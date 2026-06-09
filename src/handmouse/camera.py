@@ -99,6 +99,13 @@ class Camera:
         for _ in range(self.READ_RETRIES):
             ok, frame = self._capture.read()
             if ok and frame is not None:
+                if getattr(self.config, "mirror_input", False):
+                    try:
+                        import cv2
+                        if hasattr(cv2, "flip") and not isinstance(frame, str):
+                            frame = cv2.flip(frame, 1)
+                    except Exception:
+                        pass
                 return ok, frame
             time.sleep(self.READ_RETRY_DELAY_SECONDS)
 

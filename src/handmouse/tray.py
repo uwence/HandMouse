@@ -61,24 +61,28 @@ def start_tray_icon() -> None:
             app.SHOULD_EXIT = True
             icon.stop()
 
-        # Initial icon is Gray (IDLE)
-        initial_image = _create_circle_icon("#6c7086")
-
-        _icon = pystray.Icon(
-            "handmouse",
-            icon=initial_image,
-            title="HandMouse",
-            menu=pystray.Menu(
-                pystray.MenuItem("Toggle Active/Idle", on_toggle),
-                pystray.MenuItem("Settings", on_settings),
-                pystray.MenuItem("About", on_about),
-                pystray.MenuItem("Exit", on_exit),
+        def run_tray():
+            global _icon
+            initial_image = _create_circle_icon("#6c7086")
+            icon = pystray.Icon(
+                "handmouse",
+                icon=initial_image,
+                title="HandMouse",
+                menu=pystray.Menu(
+                    pystray.MenuItem("Toggle Active/Idle", on_toggle),
+                    pystray.MenuItem("Settings", on_settings),
+                    pystray.MenuItem("About", on_about),
+                    pystray.MenuItem("Exit", on_exit),
+                )
             )
-        )
-        
+            with _tray_lock:
+                _icon = icon
+            icon.run()
+
         # Start in a background thread to prevent blocking main thread / OpenCV
-        t = threading.Thread(target=_icon.run, daemon=True)
-        t.start()
+        t = threading.Thread(target=run_tray, daemon=True)
+
+    t.start()
 
 
 def update_tray_status(is_active: bool) -> None:
