@@ -239,7 +239,7 @@ def _build_settings_ui(root) -> None:
         scroll_sens_lbl.config(text=f"{int(float(val))}")
         
     scroll_sens_scale = tk.Scale(
-        row5, from_=50.0, to=500.0, resolution=10.0, orient="horizontal",
+        row5, from_=50.0, to=3000.0, resolution=50.0, orient="horizontal",
         variable=scroll_sens_var, bg=card_color, fg=text_color, troughcolor=entry_bg,
         activebackground=accent_color, highlightthickness=0, bd=0, showvalue=False,
         command=_update_scroll_lbl
