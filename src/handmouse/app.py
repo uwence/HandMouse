@@ -279,8 +279,9 @@ def _run_loop(
         
         hand_missing = not hand_result.landmarks
 
+        palm_visible = _is_palm_open(hand_result.landmarks)
         vsign_visible = _is_vsign_open(hand_result.landmarks)
-        if vsign_visible:
+        if palm_visible:
             if palm_visible_start_ms is None:
                 palm_visible_start_ms = now_ms
             palm_hold_ms = now_ms - palm_visible_start_ms
@@ -554,6 +555,29 @@ def _is_key_pressed_edge(raw_key: int, target: int, last_state: bool) -> bool:
     """
 
     return raw_key == target and not last_state
+
+
+def _is_palm_open(landmarks: list[Any] | None) -> bool:
+    """Loose open-palm heuristic: 4 fingertips further from palm center than MCPs."""
+
+    if not landmarks or len(landmarks) < 21:
+        return False
+
+    palm_indices = (0, 5, 9, 13, 17)
+    palm_x = sum(landmarks[i].x for i in palm_indices) / len(palm_indices)
+    palm_y = sum(landmarks[i].y for i in palm_indices) / len(palm_indices)
+
+    fingertip_indices = (8, 12, 16, 20)
+    mcp_indices = (5, 9, 13, 17)
+    extended = 0
+    for tip_i, mcp_i in zip(fingertip_indices, mcp_indices):
+        def _dist(x1, y1, x2, y2):
+            return ((x1 - x2)**2 + (y1 - y2)**2)**0.5
+        tip_d = _dist(landmarks[tip_i].x, landmarks[tip_i].y, palm_x, palm_y)
+        mcp_d = _dist(landmarks[mcp_i].x, landmarks[mcp_i].y, palm_x, palm_y)
+        if mcp_d > 0 and tip_d / mcp_d > 1.1:
+            extended += 1
+    return extended >= 3
 
 
 def _is_vsign_open(landmarks: list[Any] | None) -> bool:
