@@ -45,9 +45,8 @@ def main() -> None:
     parser.add_argument("--record-telemetry", type=str, default=None, help="Path to dump frame telemetry JSONL")
     args = parser.parse_args()
 
-    global ACTIVE_CONFIG
-    ACTIVE_CONFIG = load_or_create_config()
-    config = ACTIVE_CONFIG
+    import handmouse.config as conf
+    config = conf.ACTIVE_CONFIG
     cv2 = _load_cv2()
     screen_size = _screen_size()
     if screen_size is None:
@@ -280,8 +279,8 @@ def _run_loop(
         
         hand_missing = not hand_result.landmarks
 
-        palm_visible = _is_palm_open(hand_result.landmarks)
-        if palm_visible:
+        vsign_visible = _is_vsign_open(hand_result.landmarks)
+        if vsign_visible:
             if palm_visible_start_ms is None:
                 palm_visible_start_ms = now_ms
             palm_hold_ms = now_ms - palm_visible_start_ms
@@ -358,8 +357,8 @@ def _run_loop(
                 shortcut_should_reset = True
             elif is_active and not clutch_snapshot.clutch_down:
                 alt_tab_active = False
-                import handmouse.app as _app_ref
-                if alt_tab_detector is not None and _app_ref.ACTIVE_CONFIG.gesture_switches.alt_tab:
+                import handmouse.config as conf
+                if alt_tab_detector is not None and conf.ACTIVE_CONFIG.gesture_switches.alt_tab:
                     alt_tab_state, is_alt_held = alt_tab_detector.update(hand_result.landmarks, now_ms)
                     if alt_tab_state == AltTabState.ACTIVE or is_alt_held:
                         alt_tab_active = True
@@ -392,7 +391,7 @@ def _run_loop(
                     # Drag & Drop logic
                     if gesture_result.state == GestureState.PINCH_PRESSED:
                         pinch_start_point = index_tip
-                    elif gesture_result.state == GestureState.PINCH_HOLD and _app_ref.ACTIVE_CONFIG.gesture_switches.drag_drop:
+                    elif gesture_result.state == GestureState.PINCH_HOLD and conf.ACTIVE_CONFIG.gesture_switches.drag_drop:
                         if not drag_active and pinch_start_point is not None and index_tip is not None:
                             dist = ((index_tip.x - pinch_start_point.x) ** 2 + 
                                     (index_tip.y - pinch_start_point.y) ** 2) ** 0.5
@@ -417,12 +416,12 @@ def _run_loop(
                             mouse.left_up()
                             drag_active = False
                         else:
-                            if gesture_result.should_double_click and _app_ref.ACTIVE_CONFIG.gesture_switches.double_click:
+                            if gesture_result.should_double_click and conf.ACTIVE_CONFIG.gesture_switches.double_click:
                                 mouse.double_click()
                             else:
                                 mouse.left_click()
 
-                    if gesture_result.should_right_click and _app_ref.ACTIVE_CONFIG.gesture_switches.right_click:
+                    if gesture_result.should_right_click and conf.ACTIVE_CONFIG.gesture_switches.right_click:
                         if drag_active:
                             mouse.left_up()
                             drag_active = False
@@ -449,10 +448,10 @@ def _run_loop(
             elif not is_active or hand_result.index_tip is None or grab_result.is_grab_pose or now_ms < grab_release_cooldown_until:
                 shortcut_detector.reset()
             else:
-                shortcut_result = shortcut_detector.update(hand_result.index_tip, now_ms, palm_open=palm_visible)
+                shortcut_result = shortcut_detector.update(hand_result.index_tip, now_ms, vsign_open=vsign_visible)
                 if shortcut_result.action is not None:
-                    is_palm_swipe = shortcut_result.action in (ShortcutAction.SWIPE_UP_PALM, ShortcutAction.SWIPE_DOWN_PALM)
-                    if not is_palm_swipe or _app_ref.ACTIVE_CONFIG.gesture_switches.win_d:
+                    is_vsign_swipe = shortcut_result.action in (ShortcutAction.SWIPE_UP_VSIGN, ShortcutAction.SWIPE_DOWN_VSIGN)
+                    if not is_vsign_swipe or conf.ACTIVE_CONFIG.gesture_switches.win_d:
                         shortcut.execute(shortcut_result.action)
         except Exception as exc:
             if _is_failsafe_abort(exc):
@@ -557,25 +556,27 @@ def _is_key_pressed_edge(raw_key: int, target: int, last_state: bool) -> bool:
     return raw_key == target and not last_state
 
 
-def _is_palm_open(landmarks: list[Any] | None) -> bool:
-    """Loose open-palm heuristic: 4 fingertips further from palm center than MCPs."""
-
+def _is_vsign_open(landmarks: list[Any] | None) -> bool:
+    """V-Sign heuristic: Index and middle extended, ring and pinky curled."""
     if not landmarks or len(landmarks) < 21:
         return False
 
-    palm_indices = (0, 5, 9, 13, 17)
-    palm_x = sum(landmarks[i].x for i in palm_indices) / len(palm_indices)
-    palm_y = sum(landmarks[i].y for i in palm_indices) / len(palm_indices)
+    wrist = landmarks[0]
+    index_tip = landmarks[8]
+    middle_tip = landmarks[12]
+    ring_tip = landmarks[16]
+    pinky_tip = landmarks[20]
 
-    fingertip_indices = (8, 12, 16, 20)
-    mcp_indices = (5, 9, 13, 17)
-    extended = 0
-    for tip_i, mcp_i in zip(fingertip_indices, mcp_indices):
-        tip_d = _dist(landmarks[tip_i].x, landmarks[tip_i].y, palm_x, palm_y)
-        mcp_d = _dist(landmarks[mcp_i].x, landmarks[mcp_i].y, palm_x, palm_y)
-        if mcp_d > 0 and tip_d / mcp_d > 1.1:
-            extended += 1
-    return extended >= 3
+    def _dist(p1, p2):
+        return ((p1.x - p2.x)**2 + (p1.y - p2.y)**2)**0.5
+
+    dist_index = _dist(index_tip, wrist)
+    dist_middle = _dist(middle_tip, wrist)
+    dist_ring = _dist(ring_tip, wrist)
+    dist_pinky = _dist(pinky_tip, wrist)
+
+    return (dist_index > 0.3 and dist_middle > 0.3 and 
+            dist_ring < 0.25 and dist_pinky < 0.25)
 
 
 def _is_move_pose(landmarks: list[Any] | None) -> bool:

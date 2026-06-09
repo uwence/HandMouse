@@ -210,6 +210,8 @@ def load_or_create_config(path: str = CONFIG_PATH) -> AppConfig:
         print(f"WARNING: failed to load config from {path}: {exc}. Using defaults.")
         return DEFAULT_CONFIG
 
+ACTIVE_CONFIG = load_or_create_config()
+
 
 def save_config(config: AppConfig, path: str = CONFIG_PATH) -> None:
     try:

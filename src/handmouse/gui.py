@@ -131,7 +131,8 @@ def _build_settings_ui(root) -> None:
     banner.create_text(225, 30, text="HANDMOUSE SETTINGS", fill=text_color, font=title_font)
 
     # Load current config
-    config = app.ACTIVE_CONFIG
+    import handmouse.config as conf
+    config = conf.ACTIVE_CONFIG
 
     # Variables (MUST use master=top)
     camera_idx_var = tk.StringVar(master=top, value=str(config.camera.index))
@@ -189,7 +190,7 @@ def _build_settings_ui(root) -> None:
     ttk.Checkbutton(grid, text="Double Click (Double Pinch)", variable=dc_var).pack(anchor="w", pady=3)
     ttk.Checkbutton(grid, text="Drag & Drop (Pinch + Move)", variable=dd_var).pack(anchor="w", pady=3)
     ttk.Checkbutton(grid, text="Alt+Tab Window Switcher (3 Fingers)", variable=at_var).pack(anchor="w", pady=3)
-    ttk.Checkbutton(grid, text="Win+D Back to Desktop (Palm Swipe)", variable=wd_var).pack(anchor="w", pady=3)
+    ttk.Checkbutton(grid, text="Win+D Back to Desktop (V-Sign Swipe)", variable=wd_var).pack(anchor="w", pady=3)
 
     # 3. Gesture Sensitivity Card
     card3 = create_card(top, "Gesture Sensitivity")
@@ -294,7 +295,7 @@ def _build_settings_ui(root) -> None:
         save_config(new_config)
         
         # Update running config
-        app.ACTIVE_CONFIG = new_config
+        conf.ACTIVE_CONFIG = new_config
         
         messagebox.showinfo("Success", "Configuration saved and applied successfully!", parent=top)
         top.destroy()

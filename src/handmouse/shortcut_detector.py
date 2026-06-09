@@ -12,8 +12,8 @@ class ShortcutAction(Enum):
     SWIPE_RIGHT = auto()
     SWIPE_UP = auto()
     SWIPE_DOWN = auto()
-    SWIPE_UP_PALM = auto()
-    SWIPE_DOWN_PALM = auto()
+    SWIPE_UP_VSIGN = auto()
+    SWIPE_DOWN_VSIGN = auto()
 
 
 class ShortcutState(Enum):
@@ -37,9 +37,9 @@ class ShortcutDetector:
         self._anchor: FramePoint | None = None
         self._anchor_ms: int | None = None
         self._cooldown_until_ms = 0
-        self._palm_was_open = False
+        self._vsign_was_open = False
 
-    def update(self, point: FramePoint | None, now_ms: int, palm_open: bool = False) -> ShortcutResult:
+    def update(self, point: FramePoint | None, now_ms: int, vsign_open: bool = False) -> ShortcutResult:
         if point is None:
             self.reset()
             return ShortcutResult(ShortcutState.NO_HAND, None, None, None)
@@ -50,17 +50,17 @@ class ShortcutDetector:
         if self._anchor is None or self._anchor_ms is None:
             self._anchor = point
             self._anchor_ms = now_ms
-            self._palm_was_open = palm_open
+            self._vsign_was_open = vsign_open
             return ShortcutResult(ShortcutState.TRACKING, None, 0.0, 0.0)
 
-        # Record if palm is open at any point during tracking
-        self._palm_was_open = self._palm_was_open or palm_open
+        # Record if vsign is open at any point during tracking
+        self._vsign_was_open = self._vsign_was_open or vsign_open
 
         elapsed_ms = now_ms - self._anchor_ms
         if elapsed_ms > self.config.max_duration_ms:
             self._anchor = point
             self._anchor_ms = now_ms
-            self._palm_was_open = palm_open
+            self._vsign_was_open = vsign_open
             return ShortcutResult(ShortcutState.TRACKING, None, 0.0, 0.0)
 
         dx = point.x - self._anchor.x
@@ -69,22 +69,22 @@ class ShortcutDetector:
         if action is None:
             return ShortcutResult(ShortcutState.TRACKING, None, dx, dy)
 
-        if self._palm_was_open:
+        if self._vsign_was_open:
             if action == ShortcutAction.SWIPE_DOWN:
-                action = ShortcutAction.SWIPE_DOWN_PALM
+                action = ShortcutAction.SWIPE_DOWN_VSIGN
             elif action == ShortcutAction.SWIPE_UP:
-                action = ShortcutAction.SWIPE_UP_PALM
+                action = ShortcutAction.SWIPE_UP_VSIGN
 
         self._anchor = None
         self._anchor_ms = None
-        self._palm_was_open = False
+        self._vsign_was_open = False
         self._cooldown_until_ms = now_ms + self.config.cooldown_ms
         return ShortcutResult(ShortcutState.DETECTED, action, dx, dy)
 
     def reset(self) -> None:
         self._anchor = None
         self._anchor_ms = None
-        self._palm_was_open = False
+        self._vsign_was_open = False
 
     def _classify(self, dx: float, dy: float) -> ShortcutAction | None:
         abs_x = abs(dx)
