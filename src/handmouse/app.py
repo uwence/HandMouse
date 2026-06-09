@@ -7,10 +7,10 @@ from typing import Any
 
 from handmouse.camera import Camera
 from handmouse.clutch_input import ClutchSnapshot, GlobalClutchInput
-from handmouse.config import DEFAULT_CONFIG
+from handmouse.config import DEFAULT_CONFIG, load_or_create_config
 from handmouse.debug_view import DebugTelemetry, DebugView
 from handmouse.engagement import EngagementConfig, EngagementFSM
-from handmouse.gesture_detector import GestureConfig, GestureDetector
+from handmouse.gesture_detector import GestureConfig, GestureDetector, GestureState
 from handmouse.grab_scroll_detector import (
     GrabScrollConfig,
     GrabScrollDetector,
@@ -28,10 +28,15 @@ from handmouse.move_mode import (
 )
 from handmouse.pointer_engine import PointerEngine, PointerEngineConfig
 from handmouse.shortcut_controller import ShortcutController
-from handmouse.shortcut_detector import ShortcutDetector
+from handmouse.shortcut_detector import ShortcutDetector, ShortcutAction
+from handmouse.thread_pipeline import CameraReader, InferenceWorker
+from handmouse.alt_tab_detector import AltTabDetector, AltTabState
 
 
 WINDOW_NAME = "HandMouse"
+ACTIVE_CONFIG = DEFAULT_CONFIG
+PENDING_STATE_TOGGLE = False
+SHOULD_EXIT = False
 
 
 def main() -> None:
@@ -39,7 +44,9 @@ def main() -> None:
     parser.add_argument("--record-telemetry", type=str, default=None, help="Path to dump frame telemetry JSONL")
     args = parser.parse_args()
 
-    config = DEFAULT_CONFIG
+    global ACTIVE_CONFIG
+    ACTIVE_CONFIG = load_or_create_config()
+    config = ACTIVE_CONFIG
     cv2 = _load_cv2()
     screen_size = _screen_size()
     if screen_size is None:
@@ -62,12 +69,25 @@ def main() -> None:
                 screen_width=screen_w,
                 screen_height=screen_h,
                 control_region=config.pointer.control_region,
+                g_hi=config.pointer.g_hi,
             )
         )
         interlock = InteractionInterlock()
-        gesture = GestureDetector(GestureConfig(), interlock=interlock)
-        grab_scroll = GrabScrollDetector(GrabScrollConfig(), interlock=interlock)
+        gesture = GestureDetector(
+            GestureConfig(
+                pinch_close=config.gesture_config.pinch_close,
+                pinch_open=config.gesture_config.pinch_open,
+            ),
+            interlock=interlock
+        )
+        grab_scroll = GrabScrollDetector(
+            GrabScrollConfig(
+                scroll_sensitivity=config.grab_scroll_config.scroll_sensitivity
+            ),
+            interlock=interlock
+        )
         shortcut_detector = ShortcutDetector(config.shortcut)
+        alt_tab_detector = AltTabDetector()
         engagement = EngagementFSM(EngagementConfig())
         move_mode = MoveModeController(MoveModeConfig())
         debug_view = DebugView(config)
@@ -78,6 +98,17 @@ def main() -> None:
         except Exception as exc:
             clutch_status = "FAILED"
             print(f"WARNING: Global clutch input listener failed to start: {exc}")
+
+        try:
+            from handmouse.tray import start_tray_icon
+            start_tray_icon()
+        except Exception as exc:
+            print(f"WARNING: System tray failed to start: {exc}")
+
+        camera_reader = CameraReader(camera)
+        inference_worker = InferenceWorker(camera_reader, tracker)
+        camera_reader.start()
+        inference_worker.start()
 
         telemetry_file = None
         if args.record_telemetry:
@@ -99,11 +130,25 @@ def main() -> None:
                 move_mode=move_mode,
                 clutch_status=clutch_status,
                 telemetry_file=telemetry_file,
+                camera_reader=camera_reader,
+                inference_worker=inference_worker,
+                alt_tab_detector=alt_tab_detector,
             )
         finally:
+            try:
+                from handmouse.tray import stop_tray_icon
+                stop_tray_icon()
+            except Exception:
+                pass
             if telemetry_file:
                 telemetry_file.close()
+            inference_worker.stop()
+            camera_reader.stop()
+            inference_worker.join(timeout=1.0)
+            camera_reader.join(timeout=1.0)
     finally:
+        if "alt_tab_detector" in locals():
+            alt_tab_detector.reset()
         mouse.set_control_enabled(False)
         shortcut.set_enabled(False)
         clutch_input.stop()
@@ -130,32 +175,85 @@ def _run_loop(
     move_mode: Any | None = None,
     clutch_status: str | None = None,
     telemetry_file: Any | None = None,
+    camera_reader: CameraReader | None = None,
+    inference_worker: InferenceWorker | None = None,
+    alt_tab_detector: AltTabDetector | None = None,
 ) -> None:
     previous_frame_time = time.perf_counter()
     previous_frame_capture_time = previous_frame_time
     palm_visible_start_ms: int | None = None
     last_m_state = False
     last_q_state = False
+    pending_m_press = False
+    drag_active = False
+    pinch_start_point = None
+
+    last_applied_config = None
+    last_active_state = None
 
     while True:
-        ok, frame = camera.read()
-        if not ok or frame is None:
-            raise RuntimeError(
-                "Could not read a frame from the camera. Check Windows camera "
-                "permissions, close other apps using the camera, or change the "
-                "camera index in DEFAULT_CONFIG."
+        global ACTIVE_CONFIG, SHOULD_EXIT
+        if SHOULD_EXIT:
+            break
+
+        config = ACTIVE_CONFIG
+        if config is not last_applied_config:
+            last_applied_config = _apply_runtime_settings(
+                pointer=pointer,
+                gesture=gesture,
+                grab_scroll=grab_scroll,
+                shortcut_detector=shortcut_detector,
+                debug_view=debug_view,
+                config=config,
+                last_applied_config=last_applied_config,
             )
-        frame = _mirror_frame(cv2, frame)
 
-        now = time.perf_counter()
-        frame_capture_time = now
-        frame_age_ms = int((now - previous_frame_capture_time) * 1000)
-        previous_frame_capture_time = frame_capture_time
-        now_ms = int(now * 1000)
-        fps = _fps(previous_frame_time, now)
-        previous_frame_time = now
+        if inference_worker is not None and camera_reader is not None:
+            # Multi-threaded path
+            has_new = inference_worker.buffer.wait_new_result(timeout=0.010)
 
-        hand_result = tracker.process(frame, frame_timestamp_ms=now_ms)
+            if not has_new:
+                # Pump OpenCV events to remain responsive
+                raw_key = cv2.waitKey(1) & 0xFF
+                if raw_key == ord("q"):
+                    break
+                if raw_key == ord("m"):
+                    pending_m_press = True
+                continue
+
+            inference_worker.buffer.clear()
+            hand_result, frame, now_ms = inference_worker.buffer.get()
+            if frame is None or hand_result is None:
+                continue
+
+            frame = _mirror_frame(cv2, frame)
+
+            now = time.perf_counter()
+            frame_capture_time = now_ms / 1000.0
+            frame_age_ms = int((now - frame_capture_time) * 1000)
+            fps = _fps(previous_frame_time, now)
+            previous_frame_time = now
+        else:
+            # Synchronous fallback path (used in tests)
+            ok, frame = camera.read()
+            if not ok or frame is None:
+                raise RuntimeError(
+                    "Could not read a frame from the camera. Check Windows camera "
+                    "permissions, close other apps using the camera, or change the "
+                    "camera index in DEFAULT_CONFIG."
+                )
+            frame = _mirror_frame(cv2, frame)
+
+            now = time.perf_counter()
+            frame_capture_time = now
+            frame_age_ms = int((now - previous_frame_capture_time) * 1000)
+            previous_frame_capture_time = frame_capture_time
+            now_ms = int(now * 1000)
+            fps = _fps(previous_frame_time, now)
+            previous_frame_time = now
+
+            hand_result = tracker.process(frame, frame_timestamp_ms=now_ms)
+        
         hand_missing = not hand_result.landmarks
 
         palm_visible = _is_palm_open(hand_result.landmarks)
@@ -173,6 +271,15 @@ def _run_loop(
         last_m_state = raw_key == ord("m")
         last_q_state = raw_key == ord("q")
 
+        global PENDING_STATE_TOGGLE
+        if PENDING_STATE_TOGGLE:
+            m_pressed_edge = True
+            PENDING_STATE_TOGGLE = False
+
+        if inference_worker is not None and camera_reader is not None:
+            m_pressed_edge = m_pressed_edge or pending_m_press
+            pending_m_press = False
+
         engagement_result = engagement.update(
             hotkey_pressed=m_pressed_edge,
             palm_visible=palm_visible,
@@ -181,6 +288,14 @@ def _run_loop(
             escape_requested=q_pressed_edge,
             now_ms=now_ms,
         )
+
+        if engagement_result.is_active != last_active_state:
+            try:
+                from handmouse.tray import update_tray_status
+                update_tray_status(engagement_result.is_active)
+            except Exception:
+                pass
+            last_active_state = engagement_result.is_active
 
         if q_pressed_edge:
             break
@@ -203,6 +318,11 @@ def _run_loop(
 
         try:
             if move_active:
+                if alt_tab_detector is not None:
+                    alt_tab_detector.reset()
+                if drag_active:
+                    mouse.left_up()
+                    drag_active = False
                 delta = pointer.update(hand_result, now_ms)
                 if delta is not None and (delta.dx != 0 or delta.dy != 0):
                     mouse.move_relative(delta)
@@ -213,16 +333,81 @@ def _run_loop(
                 grab_result = _neutral_grab_result()
                 shortcut_should_reset = True
             elif is_active and not clutch_snapshot.clutch_down:
-                pointer.reset()
-                gesture_result = gesture.update(
-                    hand_result.thumb_tip,
-                    hand_result.index_tip,
-                    now_ms,
-                )
-                grab_result = grab_scroll.update(hand_result.landmarks, now_ms)
-                if gesture_result.should_click:
-                    mouse.left_click()
+                alt_tab_active = False
+                if alt_tab_detector is not None and config.gesture_switches.alt_tab:
+                    alt_tab_state, is_alt_held = alt_tab_detector.update(hand_result.landmarks, now_ms)
+                    if alt_tab_state == AltTabState.ACTIVE or is_alt_held:
+                        alt_tab_active = True
+
+                if alt_tab_active:
+                    if drag_active:
+                        mouse.left_up()
+                        drag_active = False
+                    pointer.reset()
+                    gesture_result = gesture.update(None, None, now_ms)
+                    grab_scroll.reset()
+                    grab_result = _neutral_grab_result()
+                    shortcut_should_reset = True
+                else:
+                    pointer.reset()
+                    thumb_tip = hand_result.thumb_tip
+                    index_tip = hand_result.index_tip
+                    middle_tip = None
+                    if hand_result.landmarks and len(hand_result.landmarks) > 12:
+                        middle_tip = hand_result.landmarks[12]
+
+                    gesture_result = gesture.update(
+                        thumb_tip,
+                        index_tip,
+                        now_ms,
+                        middle=middle_tip,
+                    )
+                    grab_result = grab_scroll.update(hand_result.landmarks, now_ms)
+
+                    # Drag & Drop logic
+                    if gesture_result.state == GestureState.PINCH_PRESSED:
+                        pinch_start_point = index_tip
+                    elif gesture_result.state == GestureState.PINCH_HOLD and config.gesture_switches.drag_drop:
+                        if not drag_active and pinch_start_point is not None and index_tip is not None:
+                            dist = ((index_tip.x - pinch_start_point.x) ** 2 + 
+                                    (index_tip.y - pinch_start_point.y) ** 2) ** 0.5
+                            if dist > 0.04:  # drag threshold
+                                drag_active = True
+                                mouse.left_down()
+                        
+                        if drag_active:
+                            delta = pointer.update(hand_result, now_ms)
+                            if delta is not None and (delta.dx != 0 or delta.dy != 0):
+                                mouse.move_relative(delta)
+                                dx = delta.dx
+                                dy = delta.dy
+
+                    if gesture_result.state not in (GestureState.PINCH_PRESSED, GestureState.PINCH_HOLD, GestureState.COOLDOWN):
+                        if drag_active:
+                            mouse.left_up()
+                            drag_active = False
+
+                    if gesture_result.should_click or gesture_result.should_double_click:
+                        if drag_active:
+                            mouse.left_up()
+                            drag_active = False
+                        else:
+                            if gesture_result.should_double_click and config.gesture_switches.double_click:
+                                mouse.double_click()
+                            else:
+                                mouse.left_click()
+
+                    if gesture_result.should_right_click and config.gesture_switches.right_click:
+                        if drag_active:
+                            mouse.left_up()
+                            drag_active = False
+                        mouse.right_click()
             else:
+                if alt_tab_detector is not None:
+                    alt_tab_detector.reset()
+                if drag_active:
+                    mouse.left_up()
+                    drag_active = False
                 gesture_result = gesture.update(None, None, now_ms)
                 pointer.reset()
                 grab_scroll.reset()
@@ -236,9 +421,11 @@ def _run_loop(
             elif not is_active or hand_result.index_tip is None or grab_result.is_grab_pose:
                 shortcut_detector.reset()
             else:
-                shortcut_result = shortcut_detector.update(hand_result.index_tip, now_ms)
+                shortcut_result = shortcut_detector.update(hand_result.index_tip, now_ms, palm_open=palm_visible)
                 if shortcut_result.action is not None:
-                    shortcut.execute(shortcut_result.action)
+                    is_palm_swipe = shortcut_result.action in (ShortcutAction.SWIPE_UP_PALM, ShortcutAction.SWIPE_DOWN_PALM)
+                    if not is_palm_swipe or config.gesture_switches.win_d:
+                        shortcut.execute(shortcut_result.action)
         except Exception as exc:
             if _is_failsafe_abort(exc):
                 _abort_control(
@@ -248,6 +435,7 @@ def _run_loop(
                     gesture=gesture,
                     pointer=pointer,
                     shortcut_detector=shortcut_detector,
+                    alt_tab_detector=alt_tab_detector,
                 )
                 break
             raise
@@ -289,6 +477,45 @@ def _run_loop(
             }
             telemetry_file.write(json.dumps(telemetry_data) + "\n")
             telemetry_file.flush()
+
+def _apply_runtime_settings(
+    *,
+    pointer: PointerEngine,
+    gesture: GestureDetector,
+    grab_scroll: GrabScrollDetector,
+    shortcut_detector: ShortcutDetector,
+    debug_view: DebugView,
+    config: AppConfig,
+    last_applied_config: AppConfig | None,
+) -> AppConfig:
+    # Update pointer config
+    if hasattr(pointer, "config") and hasattr(pointer.config, "screen_width"):
+        pointer.config = PointerEngineConfig(
+            screen_width=pointer.config.screen_width,
+            screen_height=pointer.config.screen_height,
+            control_region=config.pointer.control_region,
+            g_hi=config.pointer.g_hi,
+        )
+    # Update gesture config
+    if hasattr(gesture, "config"):
+        gesture.config = GestureConfig(
+            pinch_close=config.gesture_config.pinch_close,
+            pinch_open=config.gesture_config.pinch_open,
+        )
+    # Update grab scroll config
+    if hasattr(grab_scroll, "config"):
+        grab_scroll.config = GrabScrollConfig(
+            scroll_sensitivity=config.grab_scroll_config.scroll_sensitivity
+        )
+    # Update shortcut config
+    if hasattr(shortcut_detector, "config"):
+        shortcut_detector.config = config.shortcut
+    # Update debug view config
+    if hasattr(debug_view, "config"):
+        debug_view.config = config
+
+    return config
+
 
 def _is_key_pressed_edge(raw_key: int, target: int, last_state: bool) -> bool:
     """Treat any non-zero key match within this frame as a press edge.
@@ -400,6 +627,7 @@ def _abort_control(
     gesture: GestureDetector,
     pointer: PointerEngine,
     shortcut_detector: ShortcutDetector,
+    alt_tab_detector: AltTabDetector | None = None,
 ) -> None:
     mouse.set_control_enabled(False)
     shortcut.set_enabled(False)
@@ -407,6 +635,8 @@ def _abort_control(
     gesture.reset()
     pointer.reset()
     shortcut_detector.reset()
+    if alt_tab_detector is not None:
+        alt_tab_detector.reset()
 
 
 def _is_failsafe_abort(exc: Exception) -> bool:

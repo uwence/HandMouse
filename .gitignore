@@ -13,3 +13,4 @@ tests/video_review/
 tests/video_review_2/
 tests/*.mp4
 uv.lock
+.coverage

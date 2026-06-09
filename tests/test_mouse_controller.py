@@ -2,7 +2,7 @@ import pytest
 
 from handmouse import mouse_controller
 from handmouse.mouse_controller import MouseController, MouseFailsafeTriggered
-from handmouse.pointer_mapper import ScreenDelta, ScreenPoint
+from handmouse.types import ScreenDelta, ScreenPoint
 
 
 class FakeFailSafeException(Exception):

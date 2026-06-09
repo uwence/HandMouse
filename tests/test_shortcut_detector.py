@@ -1,5 +1,5 @@
 from handmouse.config import DEFAULT_CONFIG, ShortcutConfig
-from handmouse.pointer_mapper import FramePoint
+from handmouse.types import FramePoint
 from handmouse.shortcut_detector import (
     ShortcutAction,
     ShortcutDetector,
@@ -95,3 +95,17 @@ def test_default_config_detects_moderate_swipe_amplitude() -> None:
     assert detector.update(FramePoint(0.5, 0.5), now_ms=0).action is None
     assert detector.update(FramePoint(0.67, 0.5), now_ms=120).action is None
     assert detector.update(FramePoint(0.69, 0.5), now_ms=240).action == ShortcutAction.SWIPE_RIGHT
+
+
+def test_detects_palm_swipes() -> None:
+    detector = make_detector()
+
+    # Test SWIPE_DOWN_PALM
+    assert detector.update(FramePoint(0.5, 0.5), now_ms=0, palm_open=True).action is None
+    assert detector.update(FramePoint(0.5, 0.75), now_ms=120, palm_open=False).action == ShortcutAction.SWIPE_DOWN_PALM
+
+    detector = make_detector()
+    # Test SWIPE_UP_PALM
+    assert detector.update(FramePoint(0.5, 0.5), now_ms=0, palm_open=False).action is None
+    assert detector.update(FramePoint(0.5, 0.25), now_ms=120, palm_open=True).action == ShortcutAction.SWIPE_UP_PALM
+

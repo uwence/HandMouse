@@ -3,7 +3,7 @@ from handmouse.grab_scroll_detector import (
     GrabScrollDetector,
     GrabScrollState,
 )
-from handmouse.pointer_mapper import FramePoint
+from handmouse.types import FramePoint
 
 
 def make_config() -> GrabScrollConfig:

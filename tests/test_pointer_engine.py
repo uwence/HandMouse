@@ -7,7 +7,7 @@ from handmouse.pointer_engine import (
     PointerEngineConfig,
     PointerEngineState,
 )
-from handmouse.pointer_mapper import FramePoint, ScreenDelta
+from handmouse.types import FramePoint, ScreenDelta
 
 
 def make_engine(

@@ -10,7 +10,7 @@ from handmouse.app import _mirror_frame, _run_loop
 from handmouse.clutch_input import ClutchSnapshot
 from handmouse.mouse_controller import MouseFailsafeTriggered
 from handmouse.move_mode import MoveModeResult, MoveModeState
-from handmouse.pointer_mapper import FramePoint, ScreenDelta
+from handmouse.types import FramePoint, ScreenDelta
 
 
 class FakeCv2:

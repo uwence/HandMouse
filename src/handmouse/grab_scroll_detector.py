@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from math import hypot
 
-from handmouse.pointer_mapper import FramePoint
+from handmouse.types import FramePoint
 from handmouse.interlock import InteractionInterlock, InterlockType
 
 

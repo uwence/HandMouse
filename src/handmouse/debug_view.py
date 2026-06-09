@@ -8,7 +8,7 @@ from handmouse.engagement import EngagementResult
 from handmouse.gesture_detector import GestureResult, GestureState
 from handmouse.hand_tracker import HandTrackingResult
 from handmouse.pointer_engine import PointerEngine
-from handmouse.pointer_mapper import FramePoint
+from handmouse.types import FramePoint
 
 
 HAND_CONNECTIONS: tuple[tuple[int, int], ...] = (

@@ -1,5 +1,5 @@
 from handmouse.gesture_detector import GestureConfig, GestureDetector, GestureState
-from handmouse.pointer_mapper import FramePoint
+from handmouse.types import FramePoint
 
 
 CONFIG = GestureConfig(
@@ -115,7 +115,7 @@ def test_double_click_requires_two_releases() -> None:
     assert second_hold.state == GestureState.PINCH_HOLD
     assert second_release_1.state == GestureState.PINCH_HOLD
     assert second_release_2.state == GestureState.COOLDOWN
-    assert second_release_2.should_click is True
+    assert second_release_2.should_double_click is True
 
 
 def test_cooldown_suppresses_repeat_clicks() -> None:
@@ -162,3 +162,40 @@ def test_hysteresis_short_distance_jitter_does_not_flip_state() -> None:
     assert jitter_1.should_click is False
     assert jitter_2.should_click is False
     assert jitter_3.should_click is False
+
+
+def test_right_click_gesture() -> None:
+    detector = make_detector()
+    middle_closed = CLOSED_INDEX
+
+    # Pinch middle finger (right click)
+    first = detector.update(THUMB, OPEN_INDEX, now_ms=0, middle=middle_closed)
+    second = detector.update(THUMB, OPEN_INDEX, now_ms=10, middle=middle_closed)
+    assert first.right_state == GestureState.PINCH_OPEN
+    assert second.right_state == GestureState.PINCH_PRESSED
+
+    # Hold right pinch
+    held = detector.update(THUMB, OPEN_INDEX, now_ms=20, middle=middle_closed)
+    assert held.right_state == GestureState.PINCH_HOLD
+    assert held.should_right_click is False
+
+    # Release right pinch
+    rel1 = detector.update(THUMB, OPEN_INDEX, now_ms=30, middle=OPEN_INDEX)
+    rel2 = detector.update(THUMB, OPEN_INDEX, now_ms=40, middle=OPEN_INDEX)
+    assert rel1.right_state == GestureState.PINCH_HOLD
+    assert rel2.right_state == GestureState.COOLDOWN
+    assert rel2.should_right_click is True
+
+
+def test_left_and_right_click_mutual_exclusion() -> None:
+    detector = make_detector()
+
+    # Left pinch starts
+    detector.update(THUMB, CLOSED_INDEX, now_ms=0)
+    left_pressed = detector.update(THUMB, CLOSED_INDEX, now_ms=10)
+    assert left_pressed.state == GestureState.PINCH_PRESSED
+
+    # While left is active, try to pinch right
+    result = detector.update(THUMB, CLOSED_INDEX, now_ms=20, middle=CLOSED_INDEX)
+    assert result.state == GestureState.PINCH_HOLD  # Left stays active
+    assert result.right_state == GestureState.PINCH_OPEN  # Right is blocked/reset

@@ -1,7 +1,7 @@
 from handmouse.gesture_detector import GestureDetector, GestureConfig, GestureState
 from handmouse.grab_scroll_detector import GrabScrollDetector, GrabScrollConfig, GrabScrollState
 from handmouse.interlock import InteractionInterlock, InterlockType
-from handmouse.pointer_mapper import FramePoint
+from handmouse.types import FramePoint
 
 def _create_mock_grab_landmarks() -> list[FramePoint]:
     landmarks = [FramePoint(0.5, 0.5)] * 21

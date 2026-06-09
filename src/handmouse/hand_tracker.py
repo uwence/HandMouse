@@ -9,7 +9,7 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from handmouse.pointer_mapper import FramePoint
+from handmouse.types import FramePoint
 
 
 HAND_LANDMARKER_MODEL_URL = (

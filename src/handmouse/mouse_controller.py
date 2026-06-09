@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from handmouse.pointer_mapper import ScreenDelta, ScreenPoint
+from handmouse.types import ScreenDelta, ScreenPoint
 
 
 try:
@@ -62,6 +62,62 @@ class MouseController:
         backend = self._backend()
         try:
             backend.click(button="left")
+        except Exception as exc:
+            if self._is_failsafe_exception(exc):
+                raise MouseFailsafeTriggered(
+                    "PyAutoGUI failsafe triggered; disabling real mouse control."
+                ) from exc
+            raise
+
+    def right_click(self) -> None:
+        if not self._control_enabled:
+            return
+
+        backend = self._backend()
+        try:
+            backend.click(button="right")
+        except Exception as exc:
+            if self._is_failsafe_exception(exc):
+                raise MouseFailsafeTriggered(
+                    "PyAutoGUI failsafe triggered; disabling real mouse control."
+                ) from exc
+            raise
+
+    def double_click(self) -> None:
+        if not self._control_enabled:
+            return
+
+        backend = self._backend()
+        try:
+            backend.doubleClick(button="left")
+        except Exception as exc:
+            if self._is_failsafe_exception(exc):
+                raise MouseFailsafeTriggered(
+                    "PyAutoGUI failsafe triggered; disabling real mouse control."
+                ) from exc
+            raise
+
+    def left_down(self) -> None:
+        if not self._control_enabled:
+            return
+
+        backend = self._backend()
+        try:
+            backend.mouseDown(button="left")
+        except Exception as exc:
+            if self._is_failsafe_exception(exc):
+                raise MouseFailsafeTriggered(
+                    "PyAutoGUI failsafe triggered; disabling real mouse control."
+                ) from exc
+            raise
+
+    def left_up(self) -> None:
+        if not self._control_enabled:
+            return
+
+        backend = self._backend()
+        try:
+            backend.mouseUp(button="left")
         except Exception as exc:
             if self._is_failsafe_exception(exc):
                 raise MouseFailsafeTriggered(

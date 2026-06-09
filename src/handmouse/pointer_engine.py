@@ -7,7 +7,7 @@ from statistics import median
 from typing import Any
 
 from handmouse.config import ControlRegion
-from handmouse.pointer_mapper import FramePoint, ScreenDelta
+from handmouse.types import FramePoint, ScreenDelta
 
 
 @dataclass(frozen=True)
