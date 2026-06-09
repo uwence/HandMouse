@@ -35,10 +35,8 @@ from handmouse.alt_tab_detector import AltTabDetector, AltTabState
 
 
 WINDOW_NAME = "HandMouse"
-ACTIVE_CONFIG = DEFAULT_CONFIG
 PENDING_STATE_TOGGLE = False
 SHOULD_EXIT = False
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=WINDOW_NAME)
@@ -217,12 +215,14 @@ def _run_loop(
     last_applied_config = None
     last_active_state = None
 
+    import handmouse.config as conf
+
     while True:
-        global ACTIVE_CONFIG, SHOULD_EXIT
+        global SHOULD_EXIT
         if SHOULD_EXIT:
             break
 
-        config = ACTIVE_CONFIG
+        config = conf.ACTIVE_CONFIG
         if config is not last_applied_config:
             last_applied_config = _apply_runtime_settings(
                 pointer=pointer,
