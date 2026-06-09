@@ -65,7 +65,7 @@ class ShortcutDetector:
 
         dx = point.x - self._anchor.x
         dy = point.y - self._anchor.y
-        action = self._classify(dx, dy)
+        action = self._classify(dx, dy, self._palm_was_open)
         if action is None:
             return ShortcutResult(ShortcutState.TRACKING, None, dx, dy)
 
@@ -86,16 +86,20 @@ class ShortcutDetector:
         self._anchor_ms = None
         self._palm_was_open = False
 
-    def _classify(self, dx: float, dy: float) -> ShortcutAction | None:
+    def _classify(self, dx: float, dy: float, palm_was_open: bool) -> ShortcutAction | None:
         abs_x = abs(dx)
         abs_y = abs(dy)
-        threshold = self.config.min_distance
+        base_threshold = self.config.min_distance
+        
+        # Require 60% more distance for V-Sign (Win+D) swipes to prevent accidental triggers
+        h_threshold = base_threshold * 1.6 if palm_was_open else base_threshold
+        
         ratio = self.config.axis_ratio
 
-        if abs_x >= threshold and abs_x >= abs_y * ratio:
+        if abs_x >= h_threshold and abs_x >= abs_y * ratio:
             return ShortcutAction.SWIPE_RIGHT if dx > 0 else ShortcutAction.SWIPE_LEFT
 
-        if abs_y >= threshold and abs_y >= abs_x * ratio:
+        if abs_y >= base_threshold and abs_y >= abs_x * ratio:
             return ShortcutAction.SWIPE_DOWN if dy > 0 else ShortcutAction.SWIPE_UP
 
         return None
