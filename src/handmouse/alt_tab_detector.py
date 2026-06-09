@@ -8,6 +8,7 @@ from handmouse.types import FramePoint
 
 try:
     import pyautogui
+    pyautogui.PAUSE = 0
 except ModuleNotFoundError:
     pyautogui: Any | None = None
 

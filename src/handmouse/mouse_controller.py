@@ -11,6 +11,7 @@ except ModuleNotFoundError:
     pyautogui: Any | None = None
 else:
     pyautogui.FAILSAFE = True
+    pyautogui.PAUSE = 0
 
 
 class MouseFailsafeTriggered(RuntimeError):

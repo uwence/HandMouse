@@ -7,6 +7,7 @@ from handmouse.shortcut_detector import ShortcutAction
 
 try:
     import pyautogui
+    pyautogui.PAUSE = 0
 except ModuleNotFoundError:
     pyautogui: Any | None = None
 
