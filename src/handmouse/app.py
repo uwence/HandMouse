@@ -226,7 +226,8 @@ def _run_loop(
             if frame is None or hand_result is None:
                 continue
 
-            frame = _mirror_frame(cv2, frame)
+            if config.camera.mirror_input:
+                frame = _mirror_frame(cv2, frame)
 
             now = time.perf_counter()
             frame_capture_time = now_ms / 1000.0
@@ -242,7 +243,8 @@ def _run_loop(
                     "permissions, close other apps using the camera, or change the "
                     "camera index in DEFAULT_CONFIG."
                 )
-            frame = _mirror_frame(cv2, frame)
+            if config.camera.mirror_input:
+                frame = _mirror_frame(cv2, frame)
 
             now = time.perf_counter()
             frame_capture_time = now

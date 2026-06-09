@@ -13,6 +13,7 @@ class CameraConfig:
     backend_preference: tuple[str, ...] = SUPPORTED_BACKENDS
     buffer_size: int = 1
     fps_target: int = 60
+    mirror_input: bool = True
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,7 @@ DEFAULT_CONFIG = AppConfig(
         backend_preference=SUPPORTED_BACKENDS,
         buffer_size=1,
         fps_target=60,
+        mirror_input=True,
     ),
     pointer=PointerConfig(
         control_region=ControlRegion(left=0.12, top=0.10, right=0.88, bottom=0.90),
@@ -132,6 +134,7 @@ def dict_to_app_config(d: dict) -> AppConfig:
         backend_preference=tuple(cam_d.get("backend_preference", SUPPORTED_BACKENDS)),
         buffer_size=cam_d.get("buffer_size", 1),
         fps_target=cam_d.get("fps_target", 60),
+        mirror_input=cam_d.get("mirror_input", True),
     )
 
     ptr_d = d.get("pointer", {})

@@ -23,8 +23,8 @@ def _create_circle_icon(color_hex: str) -> Image.Image:
     image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     dc = ImageDraw.Draw(image)
     
-    # Draw a smooth antialiased circle with simple padding
-    dc.ellipse([4, 4, 60, 60], fill=(r, g, b, 255))
+    # Draw a smooth antialiased circle with simple padding and high-contrast white border
+    dc.ellipse([4, 4, 60, 60], fill=(r, g, b, 255), outline=(255, 255, 255, 255), width=4)
     return image
 
 

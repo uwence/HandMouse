@@ -47,7 +47,7 @@ def _run_gui() -> None:
         _gui_window = root
 
     root.title("HandMouse Settings")
-    root.geometry("450x660")
+    root.geometry("450x700")
     root.resizable(False, False)
 
     # Configure dark theme colors
@@ -98,6 +98,7 @@ def _run_gui() -> None:
 
     # Variables
     camera_idx_var = tk.StringVar(value=str(config.camera.index))
+    mirror_input_var = tk.BooleanVar(value=config.camera.mirror_input)
     speed_var = tk.DoubleVar(value=config.pointer.g_hi)
     pinch_close_var = tk.DoubleVar(value=config.gesture_config.pinch_close)
     pinch_open_var = tk.DoubleVar(value=config.gesture_config.pinch_open)
@@ -118,6 +119,10 @@ def _run_gui() -> None:
     tk.Label(row1, text="Webcam Device ID:", bg=card_color, fg=text_color).pack(side="left")
     camera_combo = ttk.Combobox(row1, textvariable=camera_idx_var, values=["0", "1", "2", "3", "4", "5"], width=5, state="readonly")
     camera_combo.pack(side="right")
+
+    row_mirror = tk.Frame(card1, bg=card_color)
+    row_mirror.pack(fill="x", padx=10, pady=5)
+    ttk.Checkbutton(row_mirror, text="Mirror Camera Feed", variable=mirror_input_var).pack(side="left")
 
     row2 = tk.Frame(card1, bg=card_color)
     row2.pack(fill="x", padx=10, pady=8)
@@ -224,6 +229,7 @@ def _run_gui() -> None:
                 backend_preference=config.camera.backend_preference,
                 buffer_size=config.camera.buffer_size,
                 fps_target=config.camera.fps_target,
+                mirror_input=mirror_input_var.get(),
             ),
             pointer=PointerConfig(
                 control_region=config.pointer.control_region,
