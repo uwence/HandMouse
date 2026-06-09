@@ -74,6 +74,7 @@ class AppConfig:
     gesture_switches: GestureSwitches = GestureSwitches()
     gesture_config: ExtendedGestureConfig = ExtendedGestureConfig()
     grab_scroll_config: ExtendedGrabScrollConfig = ExtendedGrabScrollConfig()
+    show_osd: bool = True
 
 
 DEFAULT_CONFIG = AppConfig(
@@ -191,6 +192,7 @@ def dict_to_app_config(d: dict) -> AppConfig:
         gesture_switches=gesture_switches,
         gesture_config=gesture_config,
         grab_scroll_config=grab_scroll_config,
+        show_osd=d.get("show_osd", True),
     )
 
 

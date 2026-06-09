@@ -90,6 +90,9 @@ def main() -> None:
         move_mode = MoveModeController(MoveModeConfig())
         debug_view = DebugView(config)
         
+        from handmouse.osd import OSDManager
+        osd = OSDManager(enabled=config.show_osd)
+        
         try:
             clutch_input.start()
             clutch_status = "OK"
@@ -127,6 +130,7 @@ def main() -> None:
                     camera_reader=camera_reader,
                     inference_worker=inference_worker,
                     alt_tab_detector=alt_tab_detector,
+                    osd=osd,
                 )
             except Exception as e:
                 print(f"Error in HandMouse loop: {e}")
@@ -200,6 +204,7 @@ def _run_loop(
     camera_reader: CameraReader | None = None,
     inference_worker: InferenceWorker | None = None,
     alt_tab_detector: AltTabDetector | None = None,
+    osd: Any | None = None,
 ) -> None:
     previous_frame_time = time.perf_counter()
     previous_frame_capture_time = previous_frame_time
@@ -211,6 +216,8 @@ def _run_loop(
     pinch_start_point = None
     last_frame_time_ms = 0
     grab_release_cooldown_until = 0
+    was_alt_tab_active = False
+    was_grabbing = False
 
     last_applied_config = None
     last_active_state = None
@@ -232,6 +239,7 @@ def _run_loop(
                 debug_view=debug_view,
                 config=config,
                 last_applied_config=last_applied_config,
+                osd=osd,
             )
 
         if inference_worker is not None and camera_reader is not None:
@@ -363,6 +371,9 @@ def _run_loop(
                     alt_tab_state, is_alt_held = alt_tab_detector.update(hand_result.landmarks, now_ms)
                     if alt_tab_state == AltTabState.ACTIVE or is_alt_held:
                         alt_tab_active = True
+                        if not was_alt_tab_active and osd is not None:
+                            osd.show_text("Task View")
+                was_alt_tab_active = alt_tab_active
 
                 if alt_tab_active:
                     if drag_active:
@@ -388,6 +399,11 @@ def _run_loop(
                         middle=middle_tip,
                     )
                     grab_result = grab_scroll.update(hand_result.landmarks, now_ms)
+                    
+                    is_grabbing = grab_result.state in (GrabScrollState.GRABBING, GrabScrollState.DRAGGING)
+                    if is_grabbing and not was_grabbing and osd is not None:
+                        osd.show_text("Scroll")
+                    was_grabbing = is_grabbing
 
                     # Drag & Drop logic
                     if gesture_result.state == GestureState.PINCH_PRESSED:
@@ -399,6 +415,7 @@ def _run_loop(
                             if dist > 0.04:  # drag threshold
                                 drag_active = True
                                 mouse.left_down()
+                                if osd is not None: osd.show_text("Drag")
                         
                         if drag_active:
                             delta = pointer.update(hand_result, now_ms)
@@ -419,14 +436,17 @@ def _run_loop(
                         else:
                             if gesture_result.should_double_click and conf.ACTIVE_CONFIG.gesture_switches.double_click:
                                 mouse.double_click()
+                                if osd is not None: osd.show_text("Double Click")
                             else:
                                 mouse.left_click()
+                                if osd is not None: osd.show_text("Click")
 
                     if gesture_result.should_right_click and conf.ACTIVE_CONFIG.gesture_switches.right_click:
                         if drag_active:
                             mouse.left_up()
                             drag_active = False
                         mouse.right_click()
+                        if osd is not None: osd.show_text("Right Click")
             else:
                 if alt_tab_detector is not None:
                     alt_tab_detector.reset()
@@ -454,6 +474,17 @@ def _run_loop(
                     is_palm_swipe = shortcut_result.action in (ShortcutAction.SWIPE_LEFT_PALM, ShortcutAction.SWIPE_RIGHT_PALM)
                     if not is_palm_swipe or conf.ACTIVE_CONFIG.gesture_switches.win_d:
                         shortcut.execute(shortcut_result.action)
+                        if osd is not None:
+                            action_names = {
+                                ShortcutAction.SWIPE_LEFT_PALM: "Desktop (Win+D)",
+                                ShortcutAction.SWIPE_RIGHT_PALM: "Desktop (Win+D)",
+                                ShortcutAction.SWIPE_UP: "Scroll Down",
+                                ShortcutAction.SWIPE_DOWN: "Scroll Up",
+                                ShortcutAction.SWIPE_LEFT: "Back",
+                                ShortcutAction.SWIPE_RIGHT: "Forward",
+                            }
+                            if shortcut_result.action in action_names:
+                                osd.show_text(action_names[shortcut_result.action])
         except Exception as exc:
             if _is_failsafe_abort(exc):
                 _abort_control(
@@ -515,6 +546,7 @@ def _apply_runtime_settings(
     debug_view: DebugView,
     config: AppConfig,
     last_applied_config: AppConfig | None,
+    osd: Any | None = None,
 ) -> AppConfig:
     # Update pointer config
     if hasattr(pointer, "config") and hasattr(pointer.config, "screen_width"):
@@ -541,6 +573,9 @@ def _apply_runtime_settings(
     # Update debug view config
     if hasattr(debug_view, "config"):
         debug_view.config = config
+    # Update OSD config
+    if osd is not None:
+        osd.set_enabled(config.show_osd)
 
     return config
 

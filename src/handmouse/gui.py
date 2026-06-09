@@ -148,6 +148,7 @@ def _build_settings_ui(root) -> None:
     dd_var = tk.BooleanVar(master=top, value=switches.drag_drop)
     at_var = tk.BooleanVar(master=top, value=switches.alt_tab)
     wd_var = tk.BooleanVar(master=top, value=switches.win_d)
+    osd_var = tk.BooleanVar(master=top, value=config.show_osd)
 
     # 1. Camera & Pointer Card
     card1 = create_card(top, "Camera & Speed Configuration")
@@ -158,22 +159,22 @@ def _build_settings_ui(root) -> None:
     camera_combo = ttk.Combobox(row1, textvariable=camera_idx_var, values=["0", "1", "2", "3", "4", "5"], width=5, state="readonly")
     camera_combo.pack(side="right")
 
-    row_mirror = tk.Frame(card1, bg=card_color)
-    row_mirror.pack(fill="x", padx=10, pady=5)
-    ttk.Checkbutton(row_mirror, text="Mirror Camera Feed", variable=mirror_input_var).pack(side="left")
-
     row2 = tk.Frame(card1, bg=card_color)
-    row2.pack(fill="x", padx=10, pady=8)
-    tk.Label(row2, text="Pointer Max Speed:", bg=card_color, fg=text_color).pack(side="left")
+    row2.pack(fill="x", padx=10, pady=5)
     
-    speed_lbl = tk.Label(row2, text=f"{speed_var.get():.1f}x", bg=card_color, fg=accent_color, width=5)
+    ttk.Checkbutton(row2, text="Mirror Camera Input", variable=mirror_input_var).pack(side="left")
+
+    row2_speed = tk.Frame(card1, bg=card_color)
+    row2_speed.pack(fill="x", padx=10, pady=5)
+    tk.Label(row2_speed, text="Pointer Speed (Gain):", bg=card_color, fg=text_color).pack(side="left")
+    speed_lbl = tk.Label(row2_speed, text=f"{speed_var.get():.1f}x", bg=card_color, fg=accent_color, width=5)
     speed_lbl.pack(side="right")
     
     def _update_speed_lbl(val):
         speed_lbl.config(text=f"{float(val):.1f}x")
         
     speed_scale = tk.Scale(
-        row2, from_=1.0, to=10.0, resolution=0.5, orient="horizontal",
+        row2_speed, from_=1.0, to=10.0, resolution=0.5, orient="horizontal",
         variable=speed_var, bg=card_color, fg=text_color, troughcolor=entry_bg,
         activebackground=accent_color, highlightthickness=0, bd=0, showvalue=False,
         command=_update_speed_lbl
@@ -181,7 +182,7 @@ def _build_settings_ui(root) -> None:
     speed_scale.pack(side="right", fill="x", expand=True, padx=(10, 5))
 
     # 2. Gesture Switches Card
-    card2 = create_card(top, "Enable / Disable Gestures")
+    card2 = create_card(top, "Enable / Disable Features")
     
     grid = tk.Frame(card2, bg=card_color)
     grid.pack(fill="x", padx=10, pady=5)
@@ -191,6 +192,7 @@ def _build_settings_ui(root) -> None:
     ttk.Checkbutton(grid, text="Drag & Drop (Pinch + Move)", variable=dd_var).pack(anchor="w", pady=3)
     ttk.Checkbutton(grid, text="Win+Tab Task View (3 Fingers)", variable=at_var).pack(anchor="w", pady=3)
     ttk.Checkbutton(grid, text="Win+D Back to Desktop (Palm Swipe L/R)", variable=wd_var).pack(anchor="w", pady=3)
+    ttk.Checkbutton(grid, text="Show On-Screen Display (OSD) feedback", variable=osd_var).pack(anchor="w", pady=3)
 
     # 3. Gesture Sensitivity Card
     card3 = create_card(top, "Gesture Sensitivity")
@@ -232,11 +234,11 @@ def _build_settings_ui(root) -> None:
     row5 = tk.Frame(card3, bg=card_color)
     row5.pack(fill="x", padx=10, pady=5)
     tk.Label(row5, text="Scroll Sensitivity:", bg=card_color, fg=text_color).pack(side="left")
-    scroll_sens_lbl = tk.Label(row5, text=f"{int(scroll_sens_var.get())}", bg=card_color, fg=accent_color, width=5)
+    scroll_sens_lbl = tk.Label(row5, text=f"{scroll_sens_var.get():.0f}", bg=card_color, fg=accent_color, width=6)
     scroll_sens_lbl.pack(side="right")
     
     def _update_scroll_lbl(val):
-        scroll_sens_lbl.config(text=f"{int(float(val))}")
+        scroll_sens_lbl.config(text=f"{float(val):.0f}")
         
     scroll_sens_scale = tk.Scale(
         row5, from_=50.0, to=3000.0, resolution=50.0, orient="horizontal",
@@ -289,6 +291,7 @@ def _build_settings_ui(root) -> None:
             grab_scroll_config=ExtendedGrabScrollConfig(
                 scroll_sensitivity=scroll_sens_var.get(),
             ),
+            show_osd=osd_var.get(),
         )
         
         # Save to file
