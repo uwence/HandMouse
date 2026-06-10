@@ -93,12 +93,19 @@ class Camera:
                 pass
 
     def read(self) -> tuple[bool, Any]:
+        import cv2
+
         if self._capture is None:
             raise RuntimeError("Camera is not open. Call open() before read().")
 
         for _ in range(self.READ_RETRIES):
             ok, frame = self._capture.read()
             if ok and frame is not None:
+                # CRITICAL FIX: MediaPipe's ML models are heavily trained on selfie-view (mirrored) images.
+                # Passing unmirrored images causes severe landmark instability and label swapping.
+                # We must ALWAYS force the frame to be mirrored before it enters the pipeline.
+                if not self.config.input_is_mirrored:
+                    frame = cv2.flip(frame, 1)
                 return ok, frame
             time.sleep(self.READ_RETRY_DELAY_SECONDS)
 
