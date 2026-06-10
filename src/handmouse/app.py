@@ -233,6 +233,7 @@ def _run_loop(
         config = conf.ACTIVE_CONFIG
         if config is not last_applied_config:
             last_applied_config = _apply_runtime_settings(
+                camera=camera,
                 pointer=pointer,
                 gesture=gesture,
                 grab_scroll=grab_scroll,
@@ -559,6 +560,7 @@ def _run_loop(
 
 def _apply_runtime_settings(
     *,
+    camera: Camera,
     pointer: PointerEngine,
     gesture: GestureDetector,
     grab_scroll: GrabScrollDetector,
@@ -568,6 +570,9 @@ def _apply_runtime_settings(
     last_applied_config: AppConfig | None,
     osd: Any | None = None,
 ) -> AppConfig:
+    # Update camera config
+    if hasattr(camera, "config"):
+        camera.config = config.camera
     # Update pointer config
     if hasattr(pointer, "config") and hasattr(pointer.config, "screen_width"):
         pointer.config = PointerEngineConfig(
