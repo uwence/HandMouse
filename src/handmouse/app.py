@@ -396,6 +396,12 @@ def _run_loop(
                     if hand_result.landmarks and len(hand_result.landmarks) > 12:
                         middle_tip = hand_result.landmarks[12]
 
+                    # Heuristic to prevent false pinches when fingers are curled into a fist
+                    if _is_finger_curled(hand_result.landmarks, 5, 8):
+                        index_tip = None
+                    if _is_finger_curled(hand_result.landmarks, 9, 12):
+                        middle_tip = None
+
                     gesture_result = gesture.update(
                         thumb_tip,
                         index_tip,
@@ -620,6 +626,26 @@ def _is_palm_facing_camera(landmarks: list[Any] | None) -> bool:
         return False
         
     return (palm_width / palm_height) >= 0.45
+
+
+def _is_finger_curled(landmarks: list[Any] | None, mcp_idx: int, tip_idx: int) -> bool:
+    """Check if a finger is curled into a fist (tip closer to wrist than MCP)."""
+    if not landmarks or len(landmarks) <= tip_idx:
+        return False
+        
+    wrist = landmarks[0]
+    mcp = landmarks[mcp_idx]
+    tip = landmarks[tip_idx]
+    
+    def _dist(p1, p2):
+        return ((p1.x - p2.x)**2 + (p1.y - p2.y)**2)**0.5
+        
+    dist_tip = _dist(wrist, tip)
+    dist_mcp = _dist(wrist, mcp)
+    
+    # If the tip distance to wrist is barely larger than MCP distance, 
+    # the finger is heavily curled inwards.
+    return dist_tip < dist_mcp * 1.2
 
 
 def _is_palm_open(landmarks: list[Any] | None) -> bool:
