@@ -646,13 +646,14 @@ def _is_palm_facing_camera(landmarks: list[Any] | None, handedness_label: str | 
         cross = v1_x * v2_y - v1_y * v2_x
         
         # Because image Y coordinates go down (top-left is 0,0):
-        # A Left hand (is_left=True) with palm facing the camera has the thumb on the right side,
-        # meaning index is to the right of pinky -> cross < 0.
+        # A Left hand (is_left=True) with palm facing the camera has the thumb on the left side
+        # of the image (from the camera's perspective).
+        # This means index is to the left of pinky -> cross > 0.
         if is_left:
-            if cross >= 0:
+            if cross <= 0:
                 return False
         else:
-            if cross <= 0:
+            if cross >= 0:
                 return False
                 
     return True
