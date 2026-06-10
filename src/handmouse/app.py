@@ -411,7 +411,8 @@ def _run_loop(
                     grab_result = _neutral_grab_result()
                     shortcut_should_reset = True
                 else:
-                    pointer.reset()
+                    if not drag_active:
+                        pointer.reset()
                     thumb_tip = hand_result.thumb_tip
                     index_tip = hand_result.index_tip
                     middle_tip = None
