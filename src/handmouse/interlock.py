@@ -18,3 +18,7 @@ class InteractionInterlock:
     def release(self, interlock_type: InterlockType) -> None:
         if self._state == interlock_type:
             self._state = InterlockType.NONE
+
+    @property
+    def is_active(self) -> bool:
+        return self._state != InterlockType.NONE

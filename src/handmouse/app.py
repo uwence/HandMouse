@@ -394,11 +394,14 @@ def _run_loop(
                 alt_tab_active = False
                 import handmouse.config as conf
                 if alt_tab_detector is not None and conf.ACTIVE_CONFIG.gesture_switches.alt_tab:
-                    alt_tab_state, is_alt_held = alt_tab_detector.update(hand_result.landmarks, now_ms)
-                    if alt_tab_state == AltTabState.ACTIVE or is_alt_held:
-                        alt_tab_active = True
-                        if not was_alt_tab_active and osd is not None:
-                            osd.show_text("Task View")
+                    if interlock.is_active or drag_active:
+                        alt_tab_detector.reset()
+                    else:
+                        alt_tab_state, is_alt_held = alt_tab_detector.update(hand_result.landmarks, now_ms)
+                        if alt_tab_state == AltTabState.ACTIVE or is_alt_held:
+                            alt_tab_active = True
+                            if not was_alt_tab_active and osd is not None:
+                                osd.show_text("Task View")
                 was_alt_tab_active = alt_tab_active
 
                 if alt_tab_active:
@@ -497,7 +500,7 @@ def _run_loop(
             if grab_result.is_grab_pose:
                 grab_release_cooldown_until = now_ms + 800
 
-            if shortcut_should_reset or move_active or clutch_snapshot.clutch_down:
+            if shortcut_should_reset or move_active or clutch_snapshot.clutch_down or interlock.is_active or drag_active:
                 shortcut_detector.reset()
             elif not is_active or hand_result.index_tip is None or grab_result.is_grab_pose or now_ms < grab_release_cooldown_until:
                 shortcut_detector.reset()
