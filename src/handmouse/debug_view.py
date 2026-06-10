@@ -305,6 +305,10 @@ class DebugView:
             f"Hand: {_hand_info(hand_result)}",
         ]
 
+        import handmouse.coordinate_mapper as coordinate_mapper
+        if hasattr(coordinate_mapper, "DEBUG_CROSS"):
+            lines.append(f"Math: {coordinate_mapper.DEBUG_CROSS}")
+
         x = 14
         y = 28
         line_height = 22

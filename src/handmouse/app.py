@@ -32,7 +32,7 @@ from handmouse.shortcut_controller import ShortcutController
 from handmouse.shortcut_detector import ShortcutDetector, ShortcutAction
 from handmouse.thread_pipeline import CameraReader, InferenceWorker
 from handmouse.alt_tab_detector import AltTabDetector, AltTabState
-from handmouse.coordinate_mapper import unify_hand_result
+import handmouse.coordinate_mapper as coordinate_mapper
 
 
 WINDOW_NAME = "HandMouse"
@@ -262,7 +262,7 @@ def _run_loop(
                 continue
 
             raw_hand_result = hand_result
-            hand_result = unify_hand_result(raw_hand_result, conf.ACTIVE_CONFIG.camera.input_is_mirrored)
+            hand_result = coordinate_mapper.unify_hand_result(raw_hand_result, conf.ACTIVE_CONFIG.camera.input_is_mirrored)
 
             now = time.perf_counter()
             frame_capture_time = now_ms / 1000.0
@@ -290,7 +290,7 @@ def _run_loop(
             hand_result = tracker.process(frame, frame_timestamp_ms=now_ms)
             
         raw_hand_result = hand_result
-        hand_result = unify_hand_result(raw_hand_result, conf.ACTIVE_CONFIG.camera.input_is_mirrored)
+        hand_result = coordinate_mapper.unify_hand_result(raw_hand_result, conf.ACTIVE_CONFIG.camera.input_is_mirrored)
         
         hand_missing = not hand_result or not hand_result.landmarks
 
@@ -658,6 +658,13 @@ def _is_palm_facing_camera(landmarks: list[Any] | None, handedness_label: str | 
         # v1=(+x, -y), v2=(-x, -y) -> cross = (+)*(-) - (-)*(-) = (-) -> cross < 0
         # Physical Right Hand, Palm Facing: Thumb is Left, Pinky is Right -> Index is Left(x<0), Pinky is Right(x>0)
         # v1=(-x, -y), v2=(+x, -y) -> cross = (-)*(-) - (-)*(+) = (+) -> cross > 0
+        # print(f"DEBUG: is_left={is_left}, cross={cross:.4f}")
+        # Pass the metrics to some global debug state so we can render them on OSD
+        debug_metrics = f"v1=({v1_x:.2f},{v1_y:.2f}) v2=({v2_x:.2f},{v2_y:.2f}) c={cross:.3f} L={is_left}"
+        if not hasattr(coordinate_mapper, "DEBUG_CROSS"):
+            coordinate_mapper.DEBUG_CROSS = ""
+        coordinate_mapper.DEBUG_CROSS = debug_metrics
+
         if is_left:
             if cross >= 0:  # Back of left hand
                 return False
