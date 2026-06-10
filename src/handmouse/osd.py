@@ -18,6 +18,7 @@ class OSDManager:
         self._label: Optional[tk.Label] = None
         self._text_var: Optional[tk.StringVar] = None
         self._current_text: str = ""
+        self._drawn_text: str = ""
         self._last_update_time: float = 0
         self._opacity: float = 0.0
         self._running = False
@@ -94,6 +95,12 @@ class OSDManager:
             # The maximum opacity of the entire box (making it look like frosted glass)
             max_alpha = 0.85
             
+            # Draw text if it has changed
+            if hasattr(self, '_canvas'):
+                if self._current_text != self._drawn_text:
+                    self._draw_canvas(self._current_text)
+                    self._drawn_text = self._current_text
+            
             # Keep visible for 1.2 seconds, then fade out over 1.0 second
             if time_since_update < 1.2:
                 self._opacity = max_alpha
@@ -102,8 +109,9 @@ class OSDManager:
                 self._opacity = max(0.0, max_alpha * (1.0 - progress))
             else:
                 self._opacity = 0.0
-                if hasattr(self, '_canvas'):
+                if hasattr(self, '_canvas') and self._drawn_text != "":
                     self._canvas.delete("all")
+                    self._drawn_text = ""
                 
         try:
             self._root.attributes("-alpha", self._opacity)
@@ -183,5 +191,3 @@ class OSDManager:
         with self._lock:
             self._current_text = text
             self._last_update_time = time.time()
-            if self._root is not None and hasattr(self, '_canvas'):
-                self._draw_canvas(text)
