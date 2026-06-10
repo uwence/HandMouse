@@ -333,6 +333,10 @@ def _run_loop(
             break
 
         is_active = engagement_result.is_active
+        if is_active and hand_result.landmarks and not _is_palm_facing_camera(hand_result.landmarks):
+            # Treat sideways hands as inactive for gestures and cursor movement
+            is_active = False
+
         mouse.set_control_enabled(is_active)
         shortcut.set_enabled(is_active)
         clutch_snapshot = _clutch_snapshot(clutch_input)
@@ -590,6 +594,32 @@ def _is_key_pressed_edge(raw_key: int, target: int, last_state: bool) -> bool:
     """
 
     return raw_key == target and not last_state
+
+
+def _is_palm_facing_camera(landmarks: list[Any] | None) -> bool:
+    """Check if the palm is facing the camera using a 2D aspect ratio heuristic.
+    
+    If the hand is sideways, the horizontal distance between index and pinky knuckles
+    will be very small compared to the vertical distance from wrist to middle knuckle.
+    """
+    if not landmarks or len(landmarks) < 21:
+        return False
+        
+    wrist = landmarks[0]
+    index_mcp = landmarks[5]
+    middle_mcp = landmarks[9]
+    pinky_mcp = landmarks[17]
+
+    def _dist(p1, p2):
+        return ((p1.x - p2.x)**2 + (p1.y - p2.y)**2)**0.5
+
+    palm_width = _dist(index_mcp, pinky_mcp)
+    palm_height = _dist(wrist, middle_mcp)
+    
+    if palm_height == 0:
+        return False
+        
+    return (palm_width / palm_height) >= 0.45
 
 
 def _is_palm_open(landmarks: list[Any] | None) -> bool:
