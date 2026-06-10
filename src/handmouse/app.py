@@ -333,9 +333,11 @@ def _run_loop(
             break
 
         is_active = engagement_result.is_active
-        if is_active and hand_result.landmarks and not _is_palm_facing_camera(hand_result.landmarks):
-            # Treat sideways hands as inactive for gestures and cursor movement
-            is_active = False
+        if is_active and hand_result.landmarks:
+            label = getattr(hand_result, "handedness_label", None)
+            if not _is_palm_facing_camera(hand_result.landmarks, label):
+                # Treat sideways or back-facing hands as inactive for gestures and cursor movement
+                is_active = False
 
         mouse.set_control_enabled(is_active)
         shortcut.set_enabled(is_active)
@@ -602,11 +604,14 @@ def _is_key_pressed_edge(raw_key: int, target: int, last_state: bool) -> bool:
     return raw_key == target and not last_state
 
 
-def _is_palm_facing_camera(landmarks: list[Any] | None) -> bool:
-    """Check if the palm is facing the camera using a 2D aspect ratio heuristic.
+def _is_palm_facing_camera(landmarks: list[Any] | None, handedness_label: str | None) -> bool:
+    """Check if the palm is facing the camera using 2D aspect ratio and cross product heuristics.
     
     If the hand is sideways, the horizontal distance between index and pinky knuckles
     will be very small compared to the vertical distance from wrist to middle knuckle.
+    
+    Additionally, we use the 2D cross product of the wrist->index and wrist->pinky vectors
+    to determine if the back of the hand is facing the camera based on handedness.
     """
     if not landmarks or len(landmarks) < 21:
         return False
@@ -625,7 +630,32 @@ def _is_palm_facing_camera(landmarks: list[Any] | None) -> bool:
     if palm_height == 0:
         return False
         
-    return (palm_width / palm_height) >= 0.45
+    # 1. Sideways check
+    if (palm_width / palm_height) < 0.45:
+        return False
+        
+    # 2. Back of hand check
+    if handedness_label is not None:
+        is_left = (handedness_label.lower() == "left")
+        
+        v1_x = index_mcp.x - wrist.x
+        v1_y = index_mcp.y - wrist.y
+        v2_x = pinky_mcp.x - wrist.x
+        v2_y = pinky_mcp.y - wrist.y
+        
+        cross = v1_x * v2_y - v1_y * v2_x
+        
+        # Because image Y coordinates go down (top-left is 0,0):
+        # A Left hand (is_left=True) with palm facing the camera has the thumb on the right side,
+        # meaning index is to the right of pinky -> cross < 0.
+        if is_left:
+            if cross >= 0:
+                return False
+        else:
+            if cross <= 0:
+                return False
+                
+    return True
 
 
 def _is_finger_curled(landmarks: list[Any] | None, mcp_idx: int, tip_idx: int) -> bool:
