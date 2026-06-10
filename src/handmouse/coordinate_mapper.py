@@ -37,12 +37,12 @@ def unify_hand_result(raw_result: HandTrackingResult, input_is_mirrored: bool) -
     thumb_tip = unified_landmarks[4] if len(unified_landmarks) > 4 else None
     index_tip = unified_landmarks[8] if len(unified_landmarks) > 8 else None
 
-    # MediaPipe is trained on selfie-view (mirrored) images.
-    # If the input image is mirrored, it correctly predicts physical handedness (Left = Left).
-    # If the input image is unmirrored, it incorrectly reverses handedness (Right -> Left).
-    # Therefore, if input_is_mirrored is False, we must reverse the label to get physical handedness.
+    # MediaPipe assumes the image is looking at the user (unmirrored selfie).
+    # If the image is unmirrored, it correctly predicts handedness (Right = Right).
+    # If the image is mirrored, it incorrectly reverses handedness (Right -> Left).
+    # Therefore, if input_is_mirrored is True, we must reverse the label to get physical handedness.
     unified_label = raw_result.handedness_label
-    if unified_label is not None and not input_is_mirrored:
+    if unified_label is not None and input_is_mirrored:
         if unified_label.lower() == "left":
             unified_label = "Right"
         elif unified_label.lower() == "right":
