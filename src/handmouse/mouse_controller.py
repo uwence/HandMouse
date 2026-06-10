@@ -10,7 +10,7 @@ try:
 except ModuleNotFoundError:
     pyautogui: Any | None = None
 else:
-    pyautogui.FAILSAFE = True
+    pyautogui.FAILSAFE = False
     pyautogui.PAUSE = 0
 
 
@@ -130,7 +130,7 @@ class MouseController:
         if pyautogui is None:
             raise RuntimeError("PyAutoGUI is required when mouse control is enabled.")
 
-        pyautogui.FAILSAFE = True
+        pyautogui.FAILSAFE = False
         return pyautogui
 
     @staticmethod

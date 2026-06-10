@@ -29,6 +29,7 @@ class MoveModeController:
         self.config = config
         self._state = MoveModeState.NEUTRAL
         self._armed_since_ms: int | None = None
+        self._pose_lost_since_ms: int | None = None
 
     def update(self, *, clutch_down: bool, move_pose: bool, now_ms: int) -> MoveModeResult:
         if not clutch_down:
@@ -66,6 +67,7 @@ class MoveModeController:
                 self._armed_since_ms = now_ms
             if now_ms - self._armed_since_ms >= self.config.arm_dwell_ms:
                 self._state = MoveModeState.ACTIVE
+                self._pose_lost_since_ms = None
                 return MoveModeResult(
                     state=MoveModeState.ACTIVE,
                     movement_enabled=True,
@@ -80,16 +82,29 @@ class MoveModeController:
                 clutch_down=clutch_down,
             )
 
+        # ACTIVE state
         if not move_pose:
-            self._state = MoveModeState.ARMED
-            self._armed_since_ms = now_ms
+            if self._pose_lost_since_ms is None:
+                self._pose_lost_since_ms = now_ms
+            if now_ms - self._pose_lost_since_ms >= self.config.pose_loss_grace_ms:
+                self._state = MoveModeState.NEUTRAL
+                self._armed_since_ms = None
+                self._pose_lost_since_ms = None
+                return MoveModeResult(
+                    state=MoveModeState.NEUTRAL,
+                    movement_enabled=False,
+                    move_pose=move_pose,
+                    clutch_down=clutch_down,
+                )
+            
             return MoveModeResult(
-                state=MoveModeState.ARMED,
+                state=MoveModeState.ACTIVE,
                 movement_enabled=False,
                 move_pose=move_pose,
                 clutch_down=clutch_down,
             )
 
+        self._pose_lost_since_ms = None
         return MoveModeResult(
             state=MoveModeState.ACTIVE,
             movement_enabled=True,
@@ -100,6 +115,7 @@ class MoveModeController:
     def reset(self) -> None:
         self._state = MoveModeState.NEUTRAL
         self._armed_since_ms = None
+        self._pose_lost_since_ms = None
 
 
 __all__ = [

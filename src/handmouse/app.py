@@ -295,13 +295,26 @@ def _run_loop(
         
         hand_missing = not hand_result or not hand_result.landmarks
 
+        clutch_snapshot = _clutch_snapshot(clutch_input)
+        
+        if clutch_snapshot.clutch_down:
+            hand_missing = False
+            
         landmarks = hand_result.landmarks if hand_result else None
+        move_pose = _is_move_pose(landmarks)
+        
         palm_visible = _is_palm_open(landmarks)
         vsign_visible = _is_vsign_open(landmarks)
+        
+        if clutch_snapshot.clutch_down and move_pose:
+            palm_visible = True
+            
         if palm_visible:
             if palm_visible_start_ms is None:
                 palm_visible_start_ms = now_ms
             palm_hold_ms = now_ms - palm_visible_start_ms
+            if clutch_snapshot.clutch_down and move_pose:
+                palm_hold_ms = 9999
         else:
             palm_visible_start_ms = None
             palm_hold_ms = 0
@@ -350,8 +363,6 @@ def _run_loop(
 
         mouse.set_control_enabled(is_active)
         shortcut.set_enabled(is_active)
-        clutch_snapshot = _clutch_snapshot(clutch_input)
-        move_pose = _is_move_pose(hand_result.landmarks)
         move_mode_result = _move_mode_result(
             move_mode=move_mode,
             is_active=is_active,

@@ -143,7 +143,7 @@ def dict_to_app_config(d: dict) -> AppConfig:
         backend_preference=tuple(cam_d.get("backend_preference", SUPPORTED_BACKENDS)),
         buffer_size=cam_d.get("buffer_size", 1),
         fps_target=cam_d.get("fps_target", 60),
-        input_is_mirrored=cam_d.get("input_is_mirrored", False),
+        input_is_mirrored=cam_d.get("input_is_mirrored", cam_d.get("mirror_input", False)),
     )
     
     view_d = d.get("view", {})

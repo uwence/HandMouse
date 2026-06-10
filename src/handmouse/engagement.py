@@ -16,7 +16,7 @@ class EngagementConfig:
     activation_hotkey: str = "m"
     palm_hold_ms: int = 200
     cooldown_ms: int = 100
-    missing_frames_to_idle: int = 4
+    missing_frames_to_idle: int = 15
     escape_hotkey: str = "q"
 
 
