@@ -13,7 +13,11 @@ class CameraConfig:
     backend_preference: tuple[str, ...] = SUPPORTED_BACKENDS
     buffer_size: int = 1
     fps_target: int = 60
-    mirror_input: bool = True
+    input_is_mirrored: bool = False
+
+@dataclass(frozen=True)
+class ViewConfig:
+    render_mirrored: bool = True
 
 
 @dataclass(frozen=True)
@@ -74,6 +78,7 @@ class AppConfig:
     gesture_switches: GestureSwitches = GestureSwitches()
     gesture_config: ExtendedGestureConfig = ExtendedGestureConfig()
     grab_scroll_config: ExtendedGrabScrollConfig = ExtendedGrabScrollConfig()
+    view: ViewConfig = ViewConfig()
     show_osd: bool = True
 
 
@@ -85,7 +90,10 @@ DEFAULT_CONFIG = AppConfig(
         backend_preference=SUPPORTED_BACKENDS,
         buffer_size=1,
         fps_target=60,
-        mirror_input=True,
+        input_is_mirrored=False,
+    ),
+    view=ViewConfig(
+        render_mirrored=True,
     ),
     pointer=PointerConfig(
         control_region=ControlRegion(left=0.12, top=0.10, right=0.88, bottom=0.90),
@@ -135,7 +143,12 @@ def dict_to_app_config(d: dict) -> AppConfig:
         backend_preference=tuple(cam_d.get("backend_preference", SUPPORTED_BACKENDS)),
         buffer_size=cam_d.get("buffer_size", 1),
         fps_target=cam_d.get("fps_target", 60),
-        mirror_input=cam_d.get("mirror_input", True),
+        input_is_mirrored=cam_d.get("input_is_mirrored", False),
+    )
+    
+    view_d = d.get("view", {})
+    view = ViewConfig(
+        render_mirrored=view_d.get("render_mirrored", d.get("camera", {}).get("mirror_input", True))
     )
 
     ptr_d = d.get("pointer", {})
@@ -192,6 +205,7 @@ def dict_to_app_config(d: dict) -> AppConfig:
         gesture_switches=gesture_switches,
         gesture_config=gesture_config,
         grab_scroll_config=grab_scroll_config,
+        view=view,
         show_osd=d.get("show_osd", True),
     )
 

@@ -32,6 +32,7 @@ from handmouse.shortcut_controller import ShortcutController
 from handmouse.shortcut_detector import ShortcutDetector, ShortcutAction
 from handmouse.thread_pipeline import CameraReader, InferenceWorker
 from handmouse.alt_tab_detector import AltTabDetector, AltTabState
+from handmouse.coordinate_mapper import unify_hand_result
 
 
 WINDOW_NAME = "HandMouse"
@@ -260,6 +261,9 @@ def _run_loop(
             if frame is None or hand_result is None:
                 continue
 
+            raw_hand_result = hand_result
+            hand_result = unify_hand_result(raw_hand_result, conf.ACTIVE_CONFIG.camera.input_is_mirrored)
+
             now = time.perf_counter()
             frame_capture_time = now_ms / 1000.0
             frame_age_ms = int((now - frame_capture_time) * 1000)
@@ -284,11 +288,15 @@ def _run_loop(
             previous_frame_time = now
 
             hand_result = tracker.process(frame, frame_timestamp_ms=now_ms)
+            
+        raw_hand_result = hand_result
+        hand_result = unify_hand_result(raw_hand_result, conf.ACTIVE_CONFIG.camera.input_is_mirrored)
         
-        hand_missing = not hand_result.landmarks
+        hand_missing = not hand_result or not hand_result.landmarks
 
-        palm_visible = _is_palm_open(hand_result.landmarks)
-        vsign_visible = _is_vsign_open(hand_result.landmarks)
+        landmarks = hand_result.landmarks if hand_result else None
+        palm_visible = _is_palm_open(landmarks)
+        vsign_visible = _is_vsign_open(landmarks)
         if palm_visible:
             if palm_visible_start_ms is None:
                 palm_visible_start_ms = now_ms
@@ -526,7 +534,7 @@ def _run_loop(
 
         debug_frame = debug_view.draw(
             frame,
-            hand_result,
+            raw_hand_result,
             gesture_result,
             is_active,
             telemetry,
@@ -645,18 +653,19 @@ def _is_palm_facing_camera(landmarks: list[Any] | None, handedness_label: str | 
         
         cross = v1_x * v2_y - v1_y * v2_x
         
-        # Because image Y coordinates go down (top-left is 0,0):
-        # A Left hand (is_left=True) with palm facing the camera has the thumb on the left side
-        # of the image (from the camera's perspective).
-        # This means index is to the left of pinky -> cross > 0.
+        # In the Unified Physical Space (X increases physical right, Y increases physical down):
+        # Physical Left Hand, Palm Facing: Thumb is Right, Pinky is Left -> Index is Right(x>0), Pinky is Left(x<0)
+        # v1=(+x, -y), v2=(-x, -y) -> cross = (+)*(-) - (-)*(-) = (-) -> cross < 0
+        # Physical Right Hand, Palm Facing: Thumb is Left, Pinky is Right -> Index is Left(x<0), Pinky is Right(x>0)
+        # v1=(-x, -y), v2=(+x, -y) -> cross = (-)*(-) - (-)*(+) = (+) -> cross > 0
         if is_left:
-            if cross <= 0:
+            if cross >= 0:  # Back of left hand
                 return False
         else:
-            if cross >= 0:
+            if cross <= 0:  # Back of right hand
                 return False
-                
-    return True
+        
+        return True
 
 
 def _is_finger_curled(landmarks: list[Any] | None, mcp_idx: int, tip_idx: int) -> bool:

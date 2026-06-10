@@ -136,7 +136,8 @@ def _build_settings_ui(root) -> None:
 
     # Variables (MUST use master=top)
     camera_idx_var = tk.StringVar(master=top, value=str(config.camera.index))
-    mirror_input_var = tk.BooleanVar(master=top, value=config.camera.mirror_input)
+    input_is_mirrored_var = tk.BooleanVar(master=top, value=config.camera.input_is_mirrored)
+    render_mirrored_var = tk.BooleanVar(master=top, value=config.view.render_mirrored)
     speed_var = tk.DoubleVar(master=top, value=config.pointer.g_hi)
     pinch_close_var = tk.DoubleVar(master=top, value=config.gesture_config.pinch_close)
     pinch_open_var = tk.DoubleVar(master=top, value=config.gesture_config.pinch_open)
@@ -162,7 +163,12 @@ def _build_settings_ui(root) -> None:
     row2 = tk.Frame(card1, bg=card_color)
     row2.pack(fill="x", padx=10, pady=5)
     
-    ttk.Checkbutton(row2, text="Mirror Camera Input", variable=mirror_input_var).pack(side="left")
+    ttk.Checkbutton(row2, text="Hardware Camera is Mirrored", variable=input_is_mirrored_var).pack(side="left")
+
+    row3 = tk.Frame(card1, bg=card_color)
+    row3.pack(fill="x", padx=10, pady=5)
+    
+    ttk.Checkbutton(row3, text="Mirror Display (Render)", variable=render_mirrored_var).pack(side="left")
 
     row2_speed = tk.Frame(card1, bg=card_color)
     row2_speed.pack(fill="x", padx=10, pady=5)
@@ -261,17 +267,20 @@ def _build_settings_ui(root) -> None:
             )
             return
 
-        new_config = AppConfig(
-            camera=CameraConfig(
+        new_config = conf.AppConfig(
+            camera=conf.CameraConfig(
                 width=config.camera.width,
                 height=config.camera.height,
                 index=int(camera_idx_var.get()),
                 backend_preference=config.camera.backend_preference,
-                buffer_size=config.camera.buffer_size,
                 fps_target=config.camera.fps_target,
-                mirror_input=mirror_input_var.get(),
+                buffer_size=config.camera.buffer_size,
+                input_is_mirrored=input_is_mirrored_var.get(),
             ),
-            pointer=PointerConfig(
+            view=conf.ViewConfig(
+                render_mirrored=render_mirrored_var.get(),
+            ),
+            pointer=conf.PointerConfig(
                 control_region=config.pointer.control_region,
                 g_hi=speed_var.get(),
             ),

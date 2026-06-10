@@ -74,6 +74,10 @@ class DebugView:
         self._draw_landmarks(cv2, frame, hand_result, width, height)
         self._draw_control_region(cv2, frame, width, height)
         self._draw_raw_index_tip(cv2, frame, hand_result, width, height)
+
+        if getattr(self.config, "view", None) and self.config.view.render_mirrored:
+            frame = cv2.flip(frame, 1)
+
         self._draw_status_panel(
             cv2,
             frame,
@@ -291,7 +295,7 @@ class DebugView:
             f"Clutch: {clutch}",
             f"Move mode: {move_mode} pose={move_pose}",
             f"Pointer: state={pointer_state} v={pointer_velocity} gain={pointer_gain} depth={pointer_depth} scale={pointer_hand_scale}",
-            f"Pinch: state={_gesture_state_name(gesture_result)} d={pinch_distance} (close=0.050 open=0.075)",
+            f"Pinch: state={_gesture_state_name(gesture_result)} d={pinch_distance} (close={self.config.gesture_config.pinch_close:.3f} open={self.config.gesture_config.pinch_open:.3f})",
             f"Grab: state={grab_state} active={grab_active} scroll={grab_scroll}",
             f"FPS: {fps_value:.1f}",
             f"Frame age: {frame_age}",
@@ -344,15 +348,15 @@ class DebugView:
         normalized = min(max(distance / self.PINCH_BAR_MAX_DISTANCE, 0.0), 1.0)
         fill_w = int(bar_w * normalized)
 
-        close_x = bar_x + int(bar_w * (self.PINCH_CLOSE_THRESHOLD / self.PINCH_BAR_MAX_DISTANCE))
+        close_x = bar_x + int(bar_w * (self.config.gesture_config.pinch_close / self.PINCH_BAR_MAX_DISTANCE))
         cv2.line(frame, (close_x, bar_y - 4), (close_x, bar_y + bar_h + 4), (80, 255, 120), 2)
 
-        open_x = bar_x + int(bar_w * (self.PINCH_OPEN_THRESHOLD / self.PINCH_BAR_MAX_DISTANCE))
+        open_x = bar_x + int(bar_w * (self.config.gesture_config.pinch_open / self.PINCH_BAR_MAX_DISTANCE))
         cv2.line(frame, (open_x, bar_y - 4), (open_x, bar_y + bar_h + 4), (80, 180, 255), 2)
 
-        if distance < self.PINCH_CLOSE_THRESHOLD:
+        if distance < self.config.gesture_config.pinch_close:
             fill_color = (80, 255, 120)
-        elif distance < self.PINCH_OPEN_THRESHOLD:
+        elif distance < self.config.gesture_config.pinch_open:
             fill_color = (80, 200, 255)
         else:
             fill_color = (180, 180, 180)
