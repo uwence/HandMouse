@@ -644,7 +644,7 @@ def _is_palm_facing_camera(landmarks: list[Any] | None, handedness_label: str | 
         return False
         
     # 1. Sideways check
-    if (palm_width / palm_height) < 0.45:
+    if (palm_width / palm_height) < 0.30:
         return False
         
     # 2. Back of hand check
