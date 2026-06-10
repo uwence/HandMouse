@@ -666,10 +666,10 @@ def _is_palm_facing_camera(landmarks: list[Any] | None, handedness_label: str | 
         coordinate_mapper.DEBUG_CROSS = debug_metrics
 
         if is_left:
-            if cross >= 0:  # Back of left hand
+            if cross <= 0:  # Back of left hand
                 return False
         else:
-            if cross <= 0:  # Back of right hand
+            if cross >= 0:  # Back of right hand
                 return False
         
         return True
