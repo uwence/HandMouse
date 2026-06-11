@@ -10,6 +10,7 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 from handmouse.types import FramePoint
+from handmouse.tracking.observation import Point3
 
 
 HAND_LANDMARKER_MODEL_URL = (
@@ -25,7 +26,7 @@ class HandTrackingResult:
     thumb_tip: FramePoint | None
     index_tip: FramePoint | None
     raw_landmarks: Any | None
-    world_landmarks: list[FramePoint] | None
+    world_landmarks: list[Point3] | None
     handedness_label: str | None
     handedness_confidence: float | None
 
@@ -167,6 +168,9 @@ class HandTracker:
         )
         self._landmarker.detect_async(image, frame_timestamp_ms)
 
+    def register_callback(self, callback: Any) -> None:
+        self._user_callback = callback
+
     def _convert_result(self, result: Any) -> HandTrackingResult:
         if not result or not getattr(result, "hand_landmarks", None):
             return HandTrackingResult(
@@ -190,7 +194,7 @@ class HandTracker:
         world_landmarks = None
         if hasattr(result, "hand_world_landmarks") and result.hand_world_landmarks:
             world_raw = result.hand_world_landmarks[selected_index]
-            world_landmarks = [FramePoint(lm.x, lm.y) for lm in world_raw]
+            world_landmarks = [Point3(x=lm.x, y=lm.y, z=lm.z) for lm in world_raw]
 
         return HandTrackingResult(
             landmarks=landmarks,

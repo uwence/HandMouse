@@ -436,7 +436,7 @@ def _run_loop(
                 frame_id=0,
                 ts_ms=now_ms,
                 image_landmarks=pts,
-                world_landmarks=None,
+                world_landmarks=hand_result.world_landmarks,
                 handedness_label=getattr(hand_result, "handedness_label", None),
                 handedness_score=getattr(hand_result, "handedness_confidence", None),
                 raw_result=hand_result,
@@ -486,6 +486,36 @@ def _run_loop(
 
             if candidates:
                 intents = policy.evaluate(obs, quality, candidates, {})
+                
+                try:
+                    from handmouse.telemetry.writer import log_event
+                    # Log committed intents
+                    for intent in intents:
+                        log_event("gesture_decision", {
+                            "ts_ms": now_ms,
+                            "action": intent.action,
+                            "risk": intent.risk.value if hasattr(intent.risk, "value") else intent.risk,
+                            "detector": intent.detector,
+                            "committed": True,
+                            "blocked_by": None,
+                        })
+                    
+                    # Log blocked intents (candidates with phase="fire" that were NOT committed)
+                    committed_actions = {intent.action for intent in intents}
+                    for cand in candidates:
+                        if cand.phase == "fire" and cand.gesture not in committed_actions:
+                            blocked_by = "quality_gate_failed" if (cand.risk == RiskClass.HIGH and not quality.ok) else "unknown"
+                            log_event("gesture_decision", {
+                                "ts_ms": now_ms,
+                                "action": cand.gesture,
+                                "risk": cand.risk.value if hasattr(cand.risk, "value") else cand.risk,
+                                "detector": cand.detector,
+                                "committed": False,
+                                "blocked_by": blocked_by,
+                            })
+                except Exception:
+                    pass
+
                 dispatches = action_router.dispatch(intents, {})
                 
                 for dispatch in dispatches:
