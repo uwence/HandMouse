@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import threading
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from handmouse import app
 from handmouse.config import (
@@ -17,6 +17,9 @@ from handmouse.config import (
     PointerConfig,
     ShortcutConfig,
     save_config,
+    dict_to_app_config,
+    dataclass_to_dict,
+    ViewConfig,
 )
 
 _gui_window = None
@@ -33,7 +36,7 @@ def _build_settings_ui(root) -> None:
     _gui_window = top
 
     top.title("HandMouse Settings")
-    top.geometry("450x700")
+    top.geometry("450x760")
     top.resizable(False, False)
 
     # Configure dark theme colors
@@ -202,6 +205,125 @@ def _build_settings_ui(root) -> None:
         command=_update_scroll_lbl
     )
     scroll_sens_scale.pack(side="right", fill="x", expand=True, padx=(10, 5))
+
+    # Preset management callbacks
+    def on_import_preset():
+        file_path = filedialog.askopenfilename(
+            parent=top,
+            title="Import Profile Preset",
+            filetypes=[("YAML Files", "*.yaml"), ("All Files", "*.*")]
+        )
+        if not file_path:
+            return
+        
+        try:
+            import yaml
+            with open(file_path, "r", encoding="utf-8") as f:
+                d = yaml.safe_load(f)
+            if not isinstance(d, dict):
+                raise ValueError("Preset file is not a valid YAML dictionary.")
+            
+            imported_config = dict_to_app_config(d)
+            
+            # Update all tkinter variables with imported config values
+            camera_idx_var.set(str(imported_config.camera.index))
+            input_is_mirrored_var.set(imported_config.camera.input_is_mirrored)
+            render_mirrored_var.set(imported_config.view.render_mirrored)
+            speed_var.set(imported_config.pointer.g_hi)
+            speed_lbl.config(text=f"{imported_config.pointer.g_hi:.1f}x")
+            
+            sw = imported_config.gesture_switches
+            rc_var.set(sw.right_click)
+            dc_var.set(sw.double_click)
+            dd_var.set(sw.drag_drop)
+            at_var.set(sw.alt_tab)
+            wd_var.set(sw.win_d)
+            osd_var.set(imported_config.show_osd)
+            
+            pinch_close_var.set(imported_config.gesture_config.pinch_close_ratio)
+            pinch_close_lbl.config(text=f"{imported_config.gesture_config.pinch_close_ratio:.3f}")
+            pinch_open_var.set(imported_config.gesture_config.pinch_open_ratio)
+            pinch_open_lbl.config(text=f"{imported_config.gesture_config.pinch_open_ratio:.3f}")
+            scroll_sens_var.set(imported_config.grab_scroll_config.scroll_sensitivity)
+            scroll_sens_lbl.config(text=f"{imported_config.grab_scroll_config.scroll_sensitivity:.0f}")
+            
+            messagebox.showinfo("Import Success", "Preset imported successfully! Click 'Save & Apply' to finalize.", parent=top)
+        except Exception as exc:
+            messagebox.showerror("Import Error", f"Failed to import preset: {exc}", parent=top)
+
+    def on_export_preset():
+        file_path = filedialog.asksaveasfilename(
+            parent=top,
+            title="Export Profile Preset",
+            defaultextension=".yaml",
+            filetypes=[("YAML Files", "*.yaml"), ("All Files", "*.*")]
+        )
+        if not file_path:
+            return
+            
+        try:
+            current_config = AppConfig(
+                camera=CameraConfig(
+                    width=config.camera.width,
+                    height=config.camera.height,
+                    index=int(camera_idx_var.get()),
+                    backend_preference=config.camera.backend_preference,
+                    fps_target=config.camera.fps_target,
+                    buffer_size=config.camera.buffer_size,
+                    input_is_mirrored=input_is_mirrored_var.get(),
+                ),
+                view=ViewConfig(
+                    render_mirrored=render_mirrored_var.get(),
+                ),
+                pointer=PointerConfig(
+                    control_region=config.pointer.control_region,
+                    g_hi=speed_var.get(),
+                ),
+                shortcut=config.shortcut,
+                clutch=config.clutch,
+                gesture_switches=GestureSwitches(
+                    right_click=rc_var.get(),
+                    double_click=dc_var.get(),
+                    drag_drop=dd_var.get(),
+                    alt_tab=at_var.get(),
+                    win_d=wd_var.get(),
+                ),
+                gesture_config=ExtendedGestureConfig(
+                    pinch_close_ratio=pinch_close_var.get(),
+                    pinch_open_ratio=pinch_open_var.get(),
+                ),
+                grab_scroll_config=ExtendedGrabScrollConfig(
+                    scroll_sensitivity=scroll_sens_var.get(),
+                ),
+                show_osd=osd_var.get(),
+            )
+            
+            import yaml
+            with open(file_path, "w", encoding="utf-8") as f:
+                yaml.dump(dataclass_to_dict(current_config), f, default_flow_style=False, sort_keys=False)
+                
+            messagebox.showinfo("Export Success", "Preset exported successfully!", parent=top)
+        except Exception as exc:
+            messagebox.showerror("Export Error", f"Failed to export preset: {exc}", parent=top)
+
+    # 4. Profile Preset Card
+    card4 = create_card(top, "Preset Profile Management")
+    row_presets = tk.Frame(card4, bg=card_color)
+    row_presets.pack(fill="x", padx=10, pady=5)
+    
+    import_btn = tk.Button(
+        row_presets, text="Import Preset...", font=button_font, bg="#45475a", fg=text_color,
+        activebackground="#585b70", activeforeground=text_color, bd=0, relief="flat",
+        padx=12, pady=5, command=on_import_preset, cursor="hand2"
+    )
+    import_btn.pack(side="left", padx=(5, 10))
+    
+    export_btn = tk.Button(
+        row_presets, text="Export Preset...", font=button_font, bg="#45475a", fg=text_color,
+        activebackground="#585b70", activeforeground=text_color, bd=0, relief="flat",
+        padx=12, pady=5, command=on_export_preset, cursor="hand2"
+    )
+    export_btn.pack(side="left")
 
     # Action Buttons
     btn_frame = tk.Frame(top, bg=bg_color)

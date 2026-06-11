@@ -88,5 +88,14 @@ class ActionRouter:
                 blocked_by=blocked_by,
                 latency_ms=0
             ))
+            try:
+                from handmouse.telemetry.writer import log_event
+                log_event("action_dispatch", {
+                    "action": intent.action,
+                    "executed": executed,
+                    "blocked_by": blocked_by,
+                })
+            except Exception:
+                pass
             
         return results

@@ -79,6 +79,8 @@ def test_gui_run_and_save(monkeypatch: pytest.MonkeyPatch) -> None:
     # Capturing variables and commands
     save_callback = None
     cancel_callback = None
+    import_callback = None
+    export_callback = None
 
     class MockTk:
         def __init__(self) -> None:
@@ -121,11 +123,15 @@ def test_gui_run_and_save(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class MockButton:
         def __init__(self, parent, text, **kwargs) -> None:
-            nonlocal save_callback, cancel_callback
+            nonlocal save_callback, cancel_callback, import_callback, export_callback
             if "Save" in text:
                 save_callback = kwargs.get("command")
             elif "Cancel" in text:
                 cancel_callback = kwargs.get("command")
+            elif "Import" in text:
+                import_callback = kwargs.get("command")
+            elif "Export" in text:
+                export_callback = kwargs.get("command")
 
         def pack(self, **kwargs) -> None:
             pass
@@ -162,6 +168,31 @@ def test_gui_run_and_save(monkeypatch: pytest.MonkeyPatch) -> None:
     # Verify we captured the callbacks
     assert save_callback is not None
     assert cancel_callback is not None
+    assert import_callback is not None
+    assert export_callback is not None
+
+    # Test export preset
+    import tempfile
+    import os
+    import yaml
+    temp_yaml = tempfile.NamedTemporaryFile(suffix=".yaml", delete=False).name
+    try:
+        monkeypatch.setattr("tkinter.filedialog.asksaveasfilename", lambda **kwargs: temp_yaml)
+        export_callback()
+        
+        # Verify preset was exported as valid YAML config
+        with open(temp_yaml, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        assert data is not None
+        assert "camera" in data
+        assert "gesture_config" in data
+
+        # Test import preset
+        monkeypatch.setattr("tkinter.filedialog.askopenfilename", lambda **kwargs: temp_yaml)
+        import_callback()
+    finally:
+        if os.path.exists(temp_yaml):
+            os.remove(temp_yaml)
 
     # Trigger save
     save_callback()

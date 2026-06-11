@@ -122,9 +122,16 @@ def main() -> None:
         camera_reader.start()
         inference_worker.start()
 
-        telemetry_file = None
         if args.record_telemetry:
-            telemetry_file = open(args.record_telemetry, "w", encoding="utf-8")
+            import os
+            from handmouse.telemetry.writer import TelemetryWriter
+            import handmouse.telemetry.writer as tel_writer
+            filepath = args.record_telemetry
+            log_dir = os.path.dirname(filepath) or "."
+            if tel_writer._global_writer is not None:
+                tel_writer._global_writer.close()
+            tel_writer._global_writer = TelemetryWriter(log_dir=log_dir, enabled=True)
+            tel_writer._global_writer.log_file = filepath
             
         def run_cv2_app():
             try:
@@ -144,7 +151,7 @@ def main() -> None:
                     clutch_input=clutch_input,
                     move_mode=move_mode,
                     clutch_status=clutch_status,
-                    telemetry_file=telemetry_file,
+                    telemetry_file=None,
                     camera_reader=camera_reader,
                     inference_worker=inference_worker,
                     alt_tab_detector=alt_tab_detector,
@@ -161,8 +168,11 @@ def main() -> None:
                     stop_tray_icon()
                 except Exception:
                     pass
-                if telemetry_file:
-                    telemetry_file.close()
+                try:
+                    from handmouse.telemetry.writer import close_telemetry
+                    close_telemetry()
+                except Exception:
+                    pass
                 inference_worker.stop()
                 camera_reader.stop()
                 inference_worker.join(timeout=1.0)
@@ -524,20 +534,32 @@ def _run_loop(
 
         cv2.imshow(WINDOW_NAME, debug_frame)
 
-        if telemetry_file is not None:
-            telemetry_data = {
+        try:
+            from handmouse.telemetry.writer import log_event
+            log_event("frame_sample", {
+                "ts_ms": now_ms,
                 "frame_capture_time": frame_capture_time,
                 "frame_age_ms": frame_age_ms,
                 "pointer_dx": dx,
                 "pointer_dy": dy,
                 "engagement_active": is_active,
-                "click_triggered": gesture_result.should_click,
-                "scroll_delta": grab_result.scroll_delta,
                 "clutch_down": clutch_snapshot.clutch_down,
                 "move_mode": move_mode_result.state.name,
-            }
-            telemetry_file.write(json.dumps(telemetry_data) + "\n")
-            telemetry_file.flush()
+                "hand_found": bool(hand_result and hand_result.landmarks),
+                "landmarks": [[lm.x, lm.y] for lm in hand_result.landmarks] if (hand_result and hand_result.landmarks) else [],
+                "world_landmarks": [[lm.x, lm.y] for lm in hand_result.world_landmarks] if (hand_result and hand_result.world_landmarks) else None,
+            })
+            
+            for cand in candidates:
+                log_event("gesture_candidate", {
+                    "ts_ms": now_ms,
+                    "detector": cand.detector,
+                    "gesture": cand.gesture,
+                    "phase": cand.phase,
+                    "confidence": cand.confidence,
+                })
+        except Exception:
+            pass
 
 def _apply_runtime_settings(
     *,
