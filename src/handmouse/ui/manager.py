@@ -23,6 +23,11 @@ def open_settings_in_thread(mode: str = "advanced") -> None:
     else:
         _gui_queue.put("SHOW_ADVANCED_SETTINGS")
 
+def open_calibration_wizard_in_thread() -> None:
+    """Request the calibration wizard GUI to open via the persistent background thread."""
+    _start_gui_thread_if_needed()
+    _gui_queue.put("SHOW_CALIBRATION_WIZARD")
+
 def open_about_in_thread() -> None:
     """Request the about dialog to open via the persistent background thread."""
     _start_gui_thread_if_needed()
@@ -42,6 +47,9 @@ def _gui_thread_worker():
                 elif msg == "SHOW_BASIC_SETTINGS":
                     from handmouse.ui.basic_gui import _build_basic_ui
                     _build_basic_ui(root)
+                elif msg == "SHOW_CALIBRATION_WIZARD":
+                    from handmouse.ui.calibration_wizard import _build_wizard_ui
+                    _build_wizard_ui(root)
                 elif msg == "SHOW_ABOUT":
                     _build_about_ui(root)
         except queue.Empty:

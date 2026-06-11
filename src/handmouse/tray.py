@@ -6,7 +6,7 @@ from tkinter import messagebox
 from PIL import Image, ImageDraw
 import pystray
 
-from handmouse.ui.manager import open_settings_in_thread, open_about_in_thread
+from handmouse.ui.manager import open_settings_in_thread, open_about_in_thread, open_calibration_wizard_in_thread
 
 _tray_lock = threading.Lock()
 _icon: pystray.Icon | None = None
@@ -45,6 +45,9 @@ def start_tray_icon() -> None:
         def on_settings_advanced(icon, item):
             open_settings_in_thread("advanced")
 
+        def on_calibration_wizard(icon, item):
+            open_calibration_wizard_in_thread()
+
         def on_about_action(icon, item):
             open_about_in_thread()
 
@@ -77,6 +80,7 @@ def start_tray_icon() -> None:
                 )),
                 pystray.MenuItem("Settings (Basic)", on_settings_basic),
                 pystray.MenuItem("Settings (Advanced)", on_settings_advanced),
+                pystray.MenuItem("Calibration Wizard", on_calibration_wizard),
                 pystray.MenuItem("About", on_about_action),
                 pystray.MenuItem("Exit", on_exit),
             )
@@ -108,6 +112,9 @@ def start_tray_icon_blocking() -> None:
         def on_settings_advanced(icon, item):
             open_settings_in_thread("advanced")
 
+        def on_calibration_wizard(icon, item):
+            open_calibration_wizard_in_thread()
+
         def on_about_action(icon, item):
             open_about_in_thread()
 
@@ -140,6 +147,7 @@ def start_tray_icon_blocking() -> None:
                 )),
                 pystray.MenuItem("Settings (Basic)", on_settings_basic),
                 pystray.MenuItem("Settings (Advanced)", on_settings_advanced),
+                pystray.MenuItem("Calibration Wizard", on_calibration_wizard),
                 pystray.MenuItem("About", on_about_action),
                 pystray.MenuItem("Exit", on_exit),
             )

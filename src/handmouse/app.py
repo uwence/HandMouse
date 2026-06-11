@@ -311,6 +311,20 @@ def _run_loop(
         raw_hand_result = hand_result
         hand_result = coordinate_mapper.unify_hand_result(raw_hand_result, conf.ACTIVE_CONFIG.camera.input_is_mirrored)
         
+        # Update calibration state if active
+        try:
+            from handmouse.ui.calibration_state import STATE as calibration_state
+            if calibration_state.active and hand_result and hand_result.landmarks and len(hand_result.landmarks) >= 21:
+                from math import hypot
+                lm = hand_result.landmarks
+                palm_span = hypot(lm[5].x - lm[17].x, lm[5].y - lm[17].y)
+                if palm_span == 0:
+                    palm_span = 1.0
+                left_ratio = hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y) / palm_span
+                calibration_state.update(left_ratio, palm_span)
+        except Exception:
+            pass
+            
         hand_missing = not hand_result or not hand_result.landmarks
 
         clutch_snapshot = _clutch_snapshot(clutch_input)

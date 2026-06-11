@@ -64,12 +64,10 @@ def test_tray_icon_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test menu callbacks
     menu_items = mock_icon_instance.menu
-    # "Toggle Active/Idle" is first item
-    toggle_callback = menu_items[0][1]
+    toggle_callback = next(action for text, action in menu_items if text == "Toggle Active/Idle")
     toggle_callback(mock_icon_instance, None)
     
-    # "Exit" is sixth item
-    exit_callback = menu_items[5][1]
+    exit_callback = next(action for text, action in menu_items if text == "Exit")
     exit_callback(mock_icon_instance, None)
 
     # Test stop
@@ -170,3 +168,86 @@ def test_gui_run_and_save(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Trigger cancel
     cancel_callback()
+
+
+def test_calibration_wizard(monkeypatch: pytest.MonkeyPatch) -> None:
+    class MockTk:
+        def __init__(self) -> None:
+            self.title_val = ""
+            self.geometry_val = ""
+            self.resizable_val = None
+            self.protocol_funcs = {}
+
+        def title(self, val) -> None:
+            self.title_val = val
+
+        def geometry(self, val) -> None:
+            self.geometry_val = val
+
+        def resizable(self, w, h) -> None:
+            self.resizable_val = (w, h)
+
+        def configure(self, **kwargs) -> None:
+            pass
+
+        def protocol(self, name, func) -> None:
+            self.protocol_funcs[name] = func
+
+        def winfo_exists(self) -> bool:
+            return True
+
+        def mainloop(self) -> None:
+            pass
+
+        def destroy(self) -> None:
+            pass
+
+        def after(self, ms, func, *args) -> None:
+            pass
+
+    monkeypatch.setattr(tk, "Tk", MockTk)
+    monkeypatch.setattr(tk, "Toplevel", lambda master: MockTk())
+    monkeypatch.setattr(tk, "Frame", MagicMock())
+    monkeypatch.setattr(tk, "Label", MagicMock())
+    monkeypatch.setattr(tk, "Canvas", MagicMock())
+    monkeypatch.setattr(tk, "Button", MagicMock())
+    monkeypatch.setattr("tkinter.messagebox.showinfo", MagicMock())
+    monkeypatch.setattr("tkinter.messagebox.showerror", MagicMock())
+
+    from handmouse.ui.calibration_wizard import CalibrationWizard
+    import handmouse.config as conf
+
+    root = MockTk()
+    wizard = CalibrationWizard(root)
+
+    # Step 1: Intro
+    assert wizard.current_step == 1
+    wizard._on_next()
+
+    # Step 2: Open hand capture
+    assert wizard.current_step == 2
+    # Simulate capture
+    wizard.captured_samples = [0.9, 1.0, 1.1]
+    wizard._end_capture_sequence()
+    assert wizard.open_hand_ratio == pytest.approx(1.0)
+    wizard._on_next()
+
+    # Step 3: Pinch close capture
+    assert wizard.current_step == 3
+    wizard.captured_samples = [0.25, 0.30, 0.35]
+    wizard._end_capture_sequence()
+    assert wizard.pinch_ratio == pytest.approx(0.30)
+    wizard._on_next()
+
+    # Step 4: Summary
+    assert wizard.current_step == 4
+    # Expected close: 0.30 + 0.3 * (1.0 - 0.30) = 0.30 + 0.21 = 0.51
+    # Expected open: 0.30 + 0.5 * (1.0 - 0.30) = 0.30 + 0.35 = 0.65
+    assert wizard.rec_close == pytest.approx(0.51)
+    assert wizard.rec_open == pytest.approx(0.65)
+
+    # Save
+    wizard._on_next()
+    
+    assert conf.ACTIVE_CONFIG.gesture_config.pinch_close_ratio == pytest.approx(0.51)
+    assert conf.ACTIVE_CONFIG.gesture_config.pinch_open_ratio == pytest.approx(0.65)
