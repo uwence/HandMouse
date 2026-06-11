@@ -91,8 +91,8 @@ class ShortcutDetector:
         abs_y = abs(dy)
         base_threshold = self.config.min_distance
         
-        # Require 100% more distance for V-Sign (Win+D) swipes to prevent accidental triggers
-        h_threshold = base_threshold * 2.0 if palm_was_open else base_threshold
+        # Require 50% more distance for V-Sign (Win+D) swipes to prevent accidental triggers
+        h_threshold = base_threshold * 1.5 if palm_was_open else base_threshold
         
         ratio = self.config.axis_ratio
 

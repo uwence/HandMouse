@@ -735,7 +735,7 @@ def _is_palm_open(landmarks: list[Any] | None) -> bool:
             return ((x1 - x2)**2 + (y1 - y2)**2)**0.5
         tip_d = _dist(landmarks[tip_i].x, landmarks[tip_i].y, palm_x, palm_y)
         mcp_d = _dist(landmarks[mcp_i].x, landmarks[mcp_i].y, palm_x, palm_y)
-        if mcp_d > 0 and tip_d / mcp_d > 1.1:
+        if mcp_d > 0 and tip_d / mcp_d > 1.0:
             extended += 1
     return extended >= 3
 

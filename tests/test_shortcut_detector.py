@@ -99,10 +99,9 @@ def test_default_config_detects_moderate_swipe_amplitude() -> None:
 
 def test_detects_palm_swipes() -> None:
     """Horizontal swipes with palm_open=True emit SWIPE_*_PALM; the h_threshold
-    is 2x base_threshold, so a 0.25-distance move is detected as a normal
-    SWIPE_RIGHT when palm_open is False (threshold=0.2) but is rejected
-    when palm_open is True (threshold=0.4)."""
-    # Baseline: 0.25 swipe without palm_open registers as SWIPE_RIGHT
+    is 1.5x base_threshold, so a 0.35-distance move crosses the palm threshold
+    (0.3) and is detected as SWIPE_RIGHT_PALM."""
+    # Baseline: 0.25 swipe without palm_open registers as SWIPE_RIGHT (threshold=0.2)
     detector = make_detector()
     assert detector.update(FramePoint(0.5, 0.5), now_ms=0, palm_open=False).action is None
     assert (
@@ -110,7 +109,7 @@ def test_detects_palm_swipes() -> None:
         == ShortcutAction.SWIPE_RIGHT
     )
 
-    # Same 0.25 swipe with palm_open=True is rejected (h_threshold=0.4)
+    # 0.25 swipe with palm_open=True is below palm threshold (0.3) and rejected
     detector = make_detector()
     assert detector.update(FramePoint(0.5, 0.5), now_ms=0, palm_open=True).action is None
     assert (
@@ -118,11 +117,11 @@ def test_detects_palm_swipes() -> None:
         is None
     )
 
-    # A 0.45 swipe with palm_open=True is large enough to trigger SWIPE_RIGHT_PALM
+    # 0.35 swipe with palm_open=True crosses palm threshold (0.3) and triggers SWIPE_RIGHT_PALM
     detector = make_detector()
     assert detector.update(FramePoint(0.5, 0.5), now_ms=0, palm_open=True).action is None
     assert (
-        detector.update(FramePoint(0.95, 0.5), now_ms=120, palm_open=True).action
+        detector.update(FramePoint(0.85, 0.5), now_ms=120, palm_open=True).action
         == ShortcutAction.SWIPE_RIGHT_PALM
     )
 
@@ -130,7 +129,7 @@ def test_detects_palm_swipes() -> None:
     detector = make_detector()
     assert detector.update(FramePoint(0.5, 0.5), now_ms=0, palm_open=True).action is None
     assert (
-        detector.update(FramePoint(0.05, 0.5), now_ms=120, palm_open=True).action
+        detector.update(FramePoint(0.15, 0.5), now_ms=120, palm_open=True).action
         == ShortcutAction.SWIPE_LEFT_PALM
     )
 
