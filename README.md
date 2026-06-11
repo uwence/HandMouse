@@ -170,6 +170,7 @@ Hardening-related defaults now include:
 - `schema_version: 2`
 - `policy.high_risk_cooldown_ms: 500`
 - `policy.explicit_confirm_required: true`
+- `gesture_switches.win_d: false`
 
 | Knob | Where | What it does | Default |
 |---|---|---|---|

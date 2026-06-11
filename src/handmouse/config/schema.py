@@ -79,7 +79,7 @@ def dict_to_app_config(d: dict) -> AppConfig:
         double_click=sw_d.get("double_click", True),
         drag_drop=sw_d.get("drag_drop", True),
         alt_tab=sw_d.get("alt_tab", True),
-        win_d=sw_d.get("win_d", True),
+        win_d=sw_d.get("win_d", False),
     )
 
     gcfg_d = d.get("gesture_config", {})

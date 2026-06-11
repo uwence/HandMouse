@@ -170,9 +170,11 @@ class FakeShortcutController:
 class FakeDebugView:
     def __init__(self) -> None:
         self.last_telemetry: object | None = None
+        self.telemetries: list[object] = []
 
     def draw(self, frame: object, hand_result: object, gesture_result: object, is_active: bool, telemetry: object) -> object:
         self.last_telemetry = telemetry
+        self.telemetries.append(telemetry)
         return frame
 
 
@@ -203,9 +205,22 @@ class FakeMoveMode:
 class FakeQualityGate:
     def __init__(self, quality: TrackingQuality) -> None:
         self.quality = quality
+        self.calls: list[tuple[object, int, int]] = []
 
     def update(self, obs: object, screen_width: int, screen_height: int) -> TrackingQuality:
+        self.calls.append((obs, screen_width, screen_height))
         return self.quality
+
+
+class FakeActionRouter:
+    def __init__(self, results: list[list[object]]) -> None:
+        self.results = list(results)
+        self.calls: list[list[object]] = []
+
+    def dispatch(self, intents: list[object], _: object) -> list[object]:
+        self.calls.append(intents)
+        assert self.results, "no dispatch results left"
+        return self.results.pop(0)
 
 
 def make_hand_result(*, index_tip: FramePoint | None, landmarks: list[FramePoint] | None = None) -> object:
@@ -525,6 +540,83 @@ def test_run_loop_logs_quality_reasons(monkeypatch: pytest.MonkeyPatch) -> None:
     decisions = [payload for event_name, payload in events if event_name == "gesture_decision"]
     assert decisions
     assert decisions[0]["quality_reasons"] == ["unstable"]
+
+
+def test_run_loop_uses_camera_frame_size_for_quality_gate() -> None:
+    cv2 = FakeCv2(wait_keys=[0, ord("q")])
+    quality_gate = FakeQualityGate(
+        TrackingQuality(
+            ok=True,
+            score=1.0,
+            reasons=(),
+            palm_span_px=120.0,
+            handedness_ok=True,
+            stable_frames=4,
+            lost_frames=0,
+        )
+    )
+    frame = SimpleNamespace(shape=(480, 640, 3))
+
+    _run_loop(
+        cv2=cv2,
+        camera=FakeCamera(frames=[frame, frame]),
+        tracker=FakeTracker([make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=[])] * 2),
+        pointer=FakePointer(updates=[ScreenDelta(0, 0)]),
+        gesture=FakeGesture([[]]),
+        grab_scroll=FakeGrabScroll([[]]),
+        shortcut_detector=FakeShortcutDetector([[]]),
+        engagement=FakeEngagement(
+            [
+                make_engagement_result(active=False, state="IDLE"),
+                make_engagement_result(active=False, state="IDLE", reason="escape"),
+            ]
+        ),
+        mouse=FakeMouse(),
+        shortcut=FakeShortcutController(),
+        debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
+        quality_gate=quality_gate,
+    )
+
+    assert quality_gate.calls
+    assert quality_gate.calls[0][1:] == (640, 480)
+
+
+def test_run_loop_resets_dispatches_when_next_frame_has_no_candidates() -> None:
+    cv2 = FakeCv2(wait_keys=[0, 0, ord("q")])
+    debug_view = FakeDebugView()
+    router = FakeActionRouter([[SimpleNamespace(action="click_left", executed=True)]])
+
+    _run_loop(
+        cv2=cv2,
+        camera=FakeCamera(frames=[object(), object(), object()]),
+        tracker=FakeTracker([make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=[])] * 3),
+        pointer=FakePointer(updates=[ScreenDelta(0, 0), ScreenDelta(0, 0)]),
+        gesture=FakeGesture(
+            [
+                [GestureCandidate("test", "click_left", "fire", 1.0, RiskClass.MEDIUM, True)],
+                [],
+            ]
+        ),
+        grab_scroll=FakeGrabScroll([[], []]),
+        shortcut_detector=FakeShortcutDetector([[], []]),
+        engagement=FakeEngagement(
+            [
+                make_engagement_result(active=True, state="ACTIVE"),
+                make_engagement_result(active=True, state="ACTIVE"),
+                make_engagement_result(active=False, state="IDLE", reason="escape"),
+            ]
+        ),
+        mouse=FakeMouse(),
+        shortcut=FakeShortcutController(),
+        debug_view=debug_view,
+        interlock=InteractionInterlock(),
+        action_router=router,
+    )
+
+    assert len(debug_view.telemetries) >= 2
+    assert debug_view.telemetries[0].dispatches
+    assert debug_view.telemetries[1].dispatches == []
 
 
 def test_build_frame_sample_schema_contains_world_z_and_quality() -> None:

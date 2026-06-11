@@ -56,7 +56,7 @@ class GestureSwitches:
     double_click: bool = True
     drag_drop: bool = True
     alt_tab: bool = True
-    win_d: bool = True
+    win_d: bool = False
 
 
 @dataclass(frozen=True)

@@ -66,6 +66,7 @@ def test_load_corrupt_config_returns_default() -> None:
 def test_config_schema_version_defaults_to_v2() -> None:
     config = dict_to_app_config({})
     assert config.schema_version == 2
+    assert config.gesture_switches.win_d is False
 
 
 def test_invalid_high_risk_cooldown_is_rejected() -> None:

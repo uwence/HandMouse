@@ -109,7 +109,10 @@ def main() -> None:
         move_mode = MoveModeController(MoveModeConfig())
         debug_view = DebugView(config)
         quality_gate = TrackingQualityGate()
-        policy = GesturePolicy(config.policy.high_risk_cooldown_ms)
+        policy = GesturePolicy(
+            config.policy.high_risk_cooldown_ms,
+            explicit_confirm_required=config.policy.explicit_confirm_required,
+        )
         action_router = ActionRouter(mouse, shortcut)
         
         from handmouse.osd import OSDManager
@@ -132,11 +135,9 @@ def main() -> None:
             from handmouse.telemetry.writer import TelemetryWriter
             import handmouse.telemetry.writer as tel_writer
             filepath = args.record_telemetry
-            log_dir = os.path.dirname(filepath) or "."
             if tel_writer._global_writer is not None:
                 tel_writer._global_writer.close()
-            tel_writer._global_writer = TelemetryWriter(log_dir=log_dir, enabled=True)
-            tel_writer._global_writer.log_file = filepath
+            tel_writer._global_writer = TelemetryWriter(log_file=filepath, enabled=True)
             
         def run_cv2_app():
             try:
@@ -269,6 +270,11 @@ def _run_loop(
         global SHOULD_EXIT
         if SHOULD_EXIT:
             break
+
+        decisions: list[Any] = []
+        intents: list[GestureIntent] = []
+        dispatches: list[Any] = []
+        candidates: list[GestureCandidate] = []
 
         config = conf.ACTIVE_CONFIG
         if config is not last_applied_config:
@@ -427,7 +433,10 @@ def _run_loop(
         if quality_gate is None:
             quality_gate = TrackingQualityGate()
         if policy is None:
-            policy = GesturePolicy(config.policy.high_risk_cooldown_ms)
+            policy = GesturePolicy(
+                config.policy.high_risk_cooldown_ms,
+                explicit_confirm_required=config.policy.explicit_confirm_required,
+            )
         if action_router is None:
             action_router = ActionRouter(mouse, shortcut)
 
@@ -452,11 +461,13 @@ def _run_loop(
                 camera_space="mirrored"
             )
 
-        scr_w = pointer.config.screen_width if hasattr(pointer, "config") else 1920
-        scr_h = pointer.config.screen_height if hasattr(pointer, "config") else 1080
-        quality = quality_gate.update(obs, scr_w, scr_h)
-
-        candidates = []
+        frame_shape = getattr(frame, "shape", None)
+        if frame_shape is not None and len(frame_shape) >= 2:
+            frame_h, frame_w = frame_shape[:2]
+        else:
+            frame_w = getattr(config.camera, "width", 640)
+            frame_h = getattr(config.camera, "height", 480)
+        quality = quality_gate.update(obs, frame_w, frame_h)
 
         is_dragging = False
         if getattr(gesture, "_left_state", GestureState.PINCH_OPEN) == GestureState.PINCH_HOLD or \
@@ -555,8 +566,8 @@ def _run_loop(
             clutch_down=clutch_snapshot.clutch_down,
             clutch_status=clutch_status,
             move_mode=move_mode_result.state.name,
-            candidates=candidates if 'candidates' in locals() else None,
-            dispatches=dispatches if 'dispatches' in locals() else None,
+            candidates=candidates,
+            dispatches=dispatches,
             move_pose=move_mode_result.move_pose,
         )
 

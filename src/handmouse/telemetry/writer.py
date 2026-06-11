@@ -7,16 +7,24 @@ from typing import Any, Dict
 
 class TelemetryWriter:
     """Asynchronous NDJSON writer for telemetry events."""
-    def __init__(self, log_dir: str = "~/.handmouse/telemetry", enabled: bool = True):
+    def __init__(
+        self,
+        log_dir: str = "~/.handmouse/telemetry",
+        enabled: bool = True,
+        log_file: str | None = None,
+    ):
         self.enabled = enabled
         if not enabled:
             return
             
-        self.log_dir = os.path.expanduser(log_dir)
+        if log_file is not None:
+            self.log_file = os.path.expanduser(log_file)
+            self.log_dir = os.path.dirname(self.log_file) or "."
+        else:
+            self.log_dir = os.path.expanduser(log_dir)
+            timestamp = time.strftime("%Y-%m-%dT%H-%M-%SZ")
+            self.log_file = os.path.join(self.log_dir, f"session_{timestamp}.ndjson")
         os.makedirs(self.log_dir, exist_ok=True)
-        
-        timestamp = time.strftime("%Y-%m-%dT%H-%M-%SZ")
-        self.log_file = os.path.join(self.log_dir, f"session_{timestamp}.ndjson")
         
         self._queue = queue.Queue(maxsize=10000)
         self._stop_event = threading.Event()
@@ -62,11 +70,11 @@ class TelemetryWriter:
 # Global singleton
 _global_writer = None
 
-def init_telemetry(enabled: bool = True) -> None:
+def init_telemetry(enabled: bool = True, log_file: str | None = None) -> None:
     global _global_writer
     if _global_writer is not None:
         _global_writer.close()
-    _global_writer = TelemetryWriter(enabled=enabled)
+    _global_writer = TelemetryWriter(enabled=enabled, log_file=log_file)
 
 def log_event(event_name: str, payload: Dict[str, Any]) -> None:
     if _global_writer:

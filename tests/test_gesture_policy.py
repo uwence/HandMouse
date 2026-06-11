@@ -121,6 +121,19 @@ def test_policy_allows_explicit_confirmed_task_view_commit() -> None:
     assert [decision.action for decision in decisions if decision.committed] == ["task_view_commit"]
 
 
+def test_policy_can_disable_explicit_confirm_requirement() -> None:
+    policy = GesturePolicy(explicit_confirm_required=False)
+
+    decisions = policy.evaluate(
+        None,
+        make_quality(ok=True),
+        [make_candidate("task_view_commit", RiskClass.HIGH)],
+        {},
+    )
+
+    assert [decision.action for decision in decisions if decision.committed] == ["task_view_commit"]
+
+
 def test_policy_allows_task_view_cancel_when_quality_is_bad() -> None:
     policy = GesturePolicy()
 

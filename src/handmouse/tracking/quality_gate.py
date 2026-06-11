@@ -19,7 +19,7 @@ class TrackingQualityGate:
         self._lost_frames = 0
         self._last_frame_had_hand = False
 
-    def update(self, obs: HandObservation | None, screen_width: int, screen_height: int) -> TrackingQuality:
+    def update(self, obs: HandObservation | None, frame_width: int, frame_height: int) -> TrackingQuality:
         if obs is None or not obs.image_landmarks or len(obs.image_landmarks) < 21:
             self._lost_frames += 1
             self._stable_frames = 0
@@ -49,9 +49,9 @@ class TrackingQualityGate:
         # calculate palm span
         index_mcp = obs.image_landmarks[5]
         pinky_mcp = obs.image_landmarks[17]
-        # convert normalized to px approx
-        span_x = (index_mcp.x - pinky_mcp.x) * screen_width
-        span_y = (index_mcp.y - pinky_mcp.y) * screen_height
+        # Landmarks are normalized to the camera frame, not the desktop screen.
+        span_x = (index_mcp.x - pinky_mcp.x) * frame_width
+        span_y = (index_mcp.y - pinky_mcp.y) * frame_height
         palm_span_px = (span_x ** 2 + span_y ** 2) ** 0.5
         
         if palm_span_px < self.min_palm_span_px:

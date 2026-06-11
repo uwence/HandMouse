@@ -39,8 +39,13 @@ class GestureDecision:
     payload: dict[str, Any] = field(default_factory=dict)
 
 class GesturePolicy:
-    def __init__(self, high_risk_cooldown_ms: int = 500) -> None:
+    def __init__(
+        self,
+        high_risk_cooldown_ms: int = 500,
+        explicit_confirm_required: bool = True,
+    ) -> None:
         self.high_risk_cooldown_ms = high_risk_cooldown_ms
+        self.explicit_confirm_required = explicit_confirm_required
         self._last_high_risk_ms = -1
 
     def evaluate(
@@ -120,8 +125,9 @@ class GesturePolicy:
     def _requires_quality_ok(action: str) -> bool:
         return action not in {"drag_release", "task_view_cancel"}
 
-    @staticmethod
-    def _requires_explicit_confirm(action: str) -> bool:
+    def _requires_explicit_confirm(self, action: str) -> bool:
+        if not self.explicit_confirm_required:
+            return False
         return action == "task_view_commit"
 
     @staticmethod
