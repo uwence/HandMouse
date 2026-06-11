@@ -345,9 +345,6 @@ def _run_loop(
         hand_missing = not hand_result or not hand_result.landmarks
 
         clutch_snapshot = _clutch_snapshot(clutch_input)
-        
-        if clutch_snapshot.clutch_down:
-            hand_missing = False
             
         landmarks = hand_result.landmarks if hand_result else None
         move_pose = _is_move_pose(landmarks)
@@ -431,7 +428,13 @@ def _run_loop(
 
         obs = None
         if hand_result and hand_result.landmarks:
-            pts = [Point3(x=lm.x, y=lm.y, z=0.0) for lm in hand_result.landmarks]
+            raw_landmarks = getattr(hand_result, "raw_landmarks", None)
+            pts = []
+            for idx, lm in enumerate(hand_result.landmarks):
+                z = 0.0
+                if raw_landmarks is not None and idx < len(raw_landmarks):
+                    z = float(getattr(raw_landmarks[idx], "z", 0.0))
+                pts.append(Point3(x=lm.x, y=lm.y, z=z))
             obs = HandObservation(
                 frame_id=0,
                 ts_ms=now_ms,
@@ -468,7 +471,7 @@ def _run_loop(
                 pointer.reset()
                 
             if is_active:
-                if alt_tab_detector is not None and conf.ACTIVE_CONFIG.gesture_switches.alt_tab:
+                if alt_tab_detector is not None:
                     candidates.extend(alt_tab_detector.update(hand_result.landmarks, now_ms))
 
                 candidates.extend(grab_scroll.update(obs, now_ms))
@@ -577,7 +580,7 @@ def _run_loop(
                 "move_mode": move_mode_result.state.name,
                 "hand_found": bool(hand_result and hand_result.landmarks),
                 "landmarks": [[lm.x, lm.y] for lm in hand_result.landmarks] if (hand_result and hand_result.landmarks) else [],
-                "world_landmarks": [[lm.x, lm.y] for lm in hand_result.world_landmarks] if (hand_result and hand_result.world_landmarks) else None,
+                "world_landmarks": [[lm.x, lm.y, lm.z] for lm in hand_result.world_landmarks] if (hand_result and hand_result.world_landmarks) else None,
             })
             
             for cand in candidates:
@@ -701,10 +704,10 @@ def _is_palm_facing_camera(landmarks: list[Any] | None, handedness_label: str | 
         coordinate_mapper.DEBUG_CROSS = debug_metrics
 
         if is_left:
-            if cross <= 0:  # Back of left hand
+            if cross >= 0:  # Back of left hand
                 return False
         else:
-            if cross >= 0:  # Back of right hand
+            if cross <= 0:  # Back of right hand
                 return False
 
     # Without handedness_label we cannot distinguish palm from back-of-hand;
@@ -897,17 +900,6 @@ def _move_mode_result(
         clutch_down=clutch_down,
         move_pose=move_pose,
         now_ms=now_ms,
-    )
-
-
-def _neutral_grab_result() -> GrabScrollResult:
-    return GrabScrollResult(
-        state=GrabScrollState.NO_HAND,
-        active=False,
-        scroll_delta=0,
-        displacement_x=None,
-        displacement_y=None,
-        is_grab_pose=False,
     )
 
 

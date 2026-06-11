@@ -67,9 +67,26 @@ def test_alt_tab_pose_detection() -> None:
     assert detector.state == AltTabState.ACTIVE
     assert not any(c.phase == "fire" and c.gesture.startswith("nav") for c in candidates)
 
-    # 6. Releases alt when pose is broken
+    # 6. Pose loss cancels task view instead of committing
     candidates = detector.update(bad_landmarks, now_ms=800)
     assert detector.state == AltTabState.INACTIVE
     assert len(candidates) == 1
-    assert candidates[0].phase == "fire"
-    assert candidates[0].gesture == "task_view_commit"
+    assert candidates[0].phase == "cancel"
+    assert candidates[0].gesture == "task_view_cancel"
+
+
+def test_alt_tab_commit_requires_explicit_confirm_pinch() -> None:
+    detector = AltTabDetector(arming_time_ms=100)
+    good_landmarks = make_landmarks(index_ext=True, middle_ext=True, ring_ext=True, pinky_ext=False)
+
+    detector.update(good_landmarks, now_ms=0)
+    detector.update(good_landmarks, now_ms=50)
+    detector.update(good_landmarks, now_ms=120)
+
+    commit_landmarks = list(good_landmarks)
+    commit_landmarks[4] = FramePoint(commit_landmarks[8].x + 0.01, commit_landmarks[8].y)
+
+    candidates = detector.update(commit_landmarks, now_ms=250)
+
+    assert detector.state == AltTabState.INACTIVE
+    assert any(c.phase == "fire" and c.gesture == "task_view_commit" for c in candidates)

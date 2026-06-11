@@ -174,10 +174,10 @@ def test_regression_click_flow(monkeypatch: pytest.MonkeyPatch) -> None:
 
     actions = run_pipeline_simulation(series)
     
-    # Should click_left at release, or drag_hold at pressed
+    # A normal click should not synthesize drag events.
     assert "click_left" in actions
-    assert "drag_hold" in actions
-    assert "drag_release" in actions
+    assert "drag_hold" not in actions
+    assert "drag_release" not in actions
 
 
 def test_regression_scroll_flow(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -216,8 +216,10 @@ def test_regression_alt_tab_and_navigation(monkeypatch: pytest.MonkeyPatch) -> N
     # Shift hand left to navigate
     series.append(build_alt_tab_landmarks(x_offset=-0.15))
     series.append(build_alt_tab_landmarks(x_offset=-0.15))
-    # Release to commit
-    series.append(build_open_hand_landmarks())
+    # Explicit pinch confirm to commit
+    commit = build_alt_tab_landmarks(x_offset=-0.15)
+    commit[4] = [commit[8][0] + 0.01, commit[8][1]]
+    series.append(commit)
 
     actions = run_pipeline_simulation(series)
     

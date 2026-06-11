@@ -14,10 +14,17 @@ class AltTabState(Enum):
 
 
 class AltTabDetector:
-    def __init__(self, arming_time_ms: int = 350, nav_threshold: float = 0.08, cooldown_ms: int = 400) -> None:
+    def __init__(
+        self,
+        arming_time_ms: int = 350,
+        nav_threshold: float = 0.08,
+        cooldown_ms: int = 400,
+        confirm_pinch_ratio: float = 0.45,
+    ) -> None:
         self.arming_time_ms = arming_time_ms
         self.nav_threshold = nav_threshold
         self.cooldown_ms = cooldown_ms
+        self.confirm_pinch_ratio = confirm_pinch_ratio
 
         self.state = AltTabState.INACTIVE
         self._arming_start_ms = 0
@@ -82,6 +89,19 @@ class AltTabDetector:
 
         elif self.state == AltTabState.ACTIVE:
             if is_pose:
+                if self._has_confirm_pinch(landmarks):
+                    self.state = AltTabState.INACTIVE
+                    candidates.append(GestureCandidate(
+                        detector="task_view",
+                        gesture="task_view_commit",
+                        phase="fire",
+                        confidence=1.0,
+                        risk=RiskClass.HIGH,
+                        exclusive=True,
+                        measurements={"explicit_confirm": 1.0},
+                    ))
+                    return candidates
+
                 candidates.append(GestureCandidate(
                     detector="task_view",
                     gesture="task_view",
@@ -125,8 +145,8 @@ class AltTabDetector:
                 self.state = AltTabState.INACTIVE
                 candidates.append(GestureCandidate(
                     detector="task_view",
-                    gesture="task_view_commit",
-                    phase="fire",
+                    gesture="task_view_cancel",
+                    phase="cancel",
                     confidence=1.0,
                     risk=RiskClass.HIGH,
                     exclusive=True
@@ -162,6 +182,21 @@ class AltTabDetector:
             sum(landmarks[i].x for i in palm_indices) / len(palm_indices),
             sum(landmarks[i].y for i in palm_indices) / len(palm_indices)
         )
+
+    def _has_confirm_pinch(self, landmarks: list[FramePoint] | None) -> bool:
+        if not landmarks or len(landmarks) < 21:
+            return False
+
+        thumb = landmarks[4]
+        index = landmarks[8]
+        index_mcp = landmarks[5]
+        pinky_mcp = landmarks[17]
+        palm_span = ((index_mcp.x - pinky_mcp.x) ** 2 + (index_mcp.y - pinky_mcp.y) ** 2) ** 0.5
+        if palm_span <= 0:
+            return False
+
+        pinch_distance = ((thumb.x - index.x) ** 2 + (thumb.y - index.y) ** 2) ** 0.5
+        return (pinch_distance / palm_span) <= self.confirm_pinch_ratio
 
 
 __all__ = ["AltTabDetector", "AltTabState"]

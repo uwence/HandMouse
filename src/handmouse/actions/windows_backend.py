@@ -17,6 +17,8 @@ class ActionRouter:
     def __init__(self, mouse_controller: Any, shortcut_controller: Any):
         self.mouse = mouse_controller
         self.shortcut = shortcut_controller
+        self._drag_active = False
+        self._task_view_open = False
         
     def dispatch(
         self,
@@ -41,29 +43,46 @@ class ActionRouter:
                 self.mouse.right_click()
                 executed = True
             elif intent.action == "drag_hold":
-                self.mouse.left_down()
-                executed = True
+                if not self._drag_active:
+                    self.mouse.left_down()
+                    self._drag_active = True
+                    executed = True
             elif intent.action == "drag_release":
-                self.mouse.left_up()
-                executed = True
+                if self._drag_active:
+                    self.mouse.left_up()
+                    self._drag_active = False
+                    executed = True
             elif intent.action == "task_view":
-                pyautogui.hotkey("win", "tab")
-                executed = True
+                if not self._task_view_open:
+                    pyautogui.hotkey("win", "tab")
+                    self._task_view_open = True
+                    executed = True
             elif intent.action == "nav_left":
-                pyautogui.press("left")
-                executed = True
+                if self._task_view_open:
+                    pyautogui.press("left")
+                    executed = True
             elif intent.action == "nav_right":
-                pyautogui.press("right")
-                executed = True
+                if self._task_view_open:
+                    pyautogui.press("right")
+                    executed = True
             elif intent.action == "nav_up":
-                pyautogui.press("up")
-                executed = True
+                if self._task_view_open:
+                    pyautogui.press("up")
+                    executed = True
             elif intent.action == "nav_down":
-                pyautogui.press("down")
-                executed = True
+                if self._task_view_open:
+                    pyautogui.press("down")
+                    executed = True
             elif intent.action == "task_view_commit":
-                pyautogui.press("enter")
-                executed = True
+                if self._task_view_open:
+                    pyautogui.press("enter")
+                    self._task_view_open = False
+                    executed = True
+            elif intent.action == "task_view_cancel":
+                if self._task_view_open:
+                    pyautogui.press("esc")
+                    self._task_view_open = False
+                    executed = True
             elif intent.action == "scroll":
                 self.shortcut.scroll(int(intent.payload.get("delta", 0)))
                 executed = True

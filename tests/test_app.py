@@ -6,11 +6,12 @@ from types import SimpleNamespace
 import pytest
 
 import handmouse.app as app_module
-from handmouse.app import _mirror_frame, _run_loop
+from handmouse.app import _is_palm_facing_camera, _mirror_frame, _run_loop
 from handmouse.clutch_input import ClutchSnapshot
 from handmouse.mouse_controller import MouseFailsafeTriggered
 from handmouse.interlock import InteractionInterlock
 from handmouse.move_mode import MoveModeResult, MoveModeState
+from handmouse.tracking.observation import Point3
 from handmouse.types import FramePoint, ScreenDelta
 
 
@@ -117,8 +118,10 @@ class FakeEngagement:
     def __init__(self, results: list[object]) -> None:
         self.results = list(results)
         self.force_idle_calls = 0
+        self.calls: list[dict[str, object]] = []
 
     def update(self, **kwargs: object) -> object:
+        self.calls.append(kwargs)
         assert self.results, "no engagement results left"
         return self.results.pop(0)
 
@@ -204,6 +207,24 @@ def make_hand_result(*, index_tip: FramePoint | None, landmarks: list[FramePoint
         handedness_label="Left",
         handedness_confidence=0.99,
     )
+
+
+def make_palm_facing_landmarks(*, handedness: str) -> list[FramePoint]:
+    landmarks = [FramePoint(0.5, 0.5)] * 21
+    landmarks[0] = FramePoint(0.5, 0.8)
+    landmarks[9] = FramePoint(0.5, 0.55)
+    if handedness == "Left":
+        landmarks[5] = FramePoint(0.65, 0.6)
+        landmarks[17] = FramePoint(0.35, 0.6)
+    else:
+        landmarks[5] = FramePoint(0.35, 0.6)
+        landmarks[17] = FramePoint(0.65, 0.6)
+    landmarks[4] = FramePoint(landmarks[5].x, 0.45)
+    landmarks[8] = FramePoint(landmarks[5].x, 0.35)
+    landmarks[12] = FramePoint(0.5, 0.35)
+    landmarks[16] = FramePoint(landmarks[17].x, 0.35)
+    landmarks[20] = FramePoint(landmarks[17].x, 0.45)
+    return landmarks
 
 
 def make_engagement_result(*, active: bool, state: str, reason: str = "active") -> object:
@@ -328,3 +349,86 @@ def test_run_loop_passes_clutch_and_move_mode_telemetry() -> None:
 
     assert debug_view.last_telemetry.clutch_down is True
     assert debug_view.last_telemetry.move_mode == "ACTIVE"
+
+
+def test_run_loop_preserves_landmark_z_and_logs_world_z(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cv2 = FakeCv2(wait_keys=[0, ord("q")])
+    landmarks = make_palm_facing_landmarks(handedness="Left")
+    raw_landmarks = [SimpleNamespace(x=lm.x, y=lm.y, z=0.01 * idx) for idx, lm in enumerate(landmarks)]
+    world_landmarks = [Point3(x=0.1 * idx, y=0.2 * idx, z=0.3 * idx) for idx in range(21)]
+    hand_result = SimpleNamespace(
+        landmarks=landmarks,
+        thumb_tip=landmarks[4],
+        index_tip=landmarks[8],
+        raw_landmarks=raw_landmarks,
+        world_landmarks=world_landmarks,
+        handedness_label="Left",
+        handedness_confidence=0.99,
+    )
+    gesture = FakeGesture([[]])
+    events: list[tuple[str, object]] = []
+    monkeypatch.setattr(
+        "handmouse.telemetry.writer.log_event",
+        lambda event_name, payload: events.append((event_name, payload)),
+    )
+
+    _run_loop(
+        cv2=cv2,
+        camera=FakeCamera(frames=[object(), object()]),
+        tracker=FakeTracker([hand_result, hand_result]),
+        pointer=FakePointer(updates=[ScreenDelta(0, 0)]),
+        gesture=gesture,
+        grab_scroll=FakeGrabScroll([[]]),
+        shortcut_detector=FakeShortcutDetector([[]]),
+        engagement=FakeEngagement(
+            [
+                make_engagement_result(active=True, state="ACTIVE"),
+                make_engagement_result(active=False, state="IDLE", reason="escape"),
+            ]
+        ),
+        mouse=FakeMouse(),
+        shortcut=FakeShortcutController(),
+        debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
+    )
+
+    obs = gesture.calls[0][0]
+    assert obs.image_landmarks[8].z == pytest.approx(raw_landmarks[8].z)
+    frame_samples = [payload for event_name, payload in events if event_name == "frame_sample"]
+    assert frame_samples
+    assert frame_samples[0]["world_landmarks"][8] == pytest.approx(
+        [world_landmarks[8].x, world_landmarks[8].y, world_landmarks[8].z]
+    )
+
+
+def test_run_loop_does_not_mask_missing_hand_when_clutch_is_down() -> None:
+    cv2 = FakeCv2(wait_keys=[ord("q")])
+    engagement = FakeEngagement([make_engagement_result(active=False, state="IDLE", reason="escape")])
+
+    _run_loop(
+        cv2=cv2,
+        camera=FakeCamera(frames=[object()]),
+        tracker=FakeTracker([make_hand_result(index_tip=None, landmarks=[])]),
+        pointer=FakePointer(updates=[]),
+        gesture=FakeGesture([[]]),
+        grab_scroll=FakeGrabScroll([[]]),
+        shortcut_detector=FakeShortcutDetector([[]]),
+        engagement=engagement,
+        mouse=FakeMouse(),
+        shortcut=FakeShortcutController(),
+        debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
+        clutch_input=FakeClutchInput([ClutchSnapshot(clutch_down=True)]),
+    )
+
+    assert engagement.calls[0]["hand_missing"] is True
+
+
+def test_palm_facing_left_hand_matches_cross_sign_comment() -> None:
+    assert _is_palm_facing_camera(make_palm_facing_landmarks(handedness="Left"), "Left") is True
+
+
+def test_palm_facing_right_hand_matches_cross_sign_comment() -> None:
+    assert _is_palm_facing_camera(make_palm_facing_landmarks(handedness="Right"), "Right") is True

@@ -14,7 +14,14 @@ CONFIG = GestureConfig(
 def make_detector() -> GestureDetector:
     return GestureDetector(CONFIG)
 
-def make_obs(thumb_x=0.5, index_x=0.8, middle_x=0.8) -> HandObservation:
+def make_obs(
+    thumb_x=0.5,
+    thumb_y=0.5,
+    index_x=0.8,
+    index_y=0.5,
+    middle_x=0.8,
+    middle_y=0.5,
+) -> HandObservation:
     from handmouse.tracking.observation import Point3
     landmarks = [Point3(0.5, 0.5, 0.0)] * 21
     # palm span points
@@ -22,9 +29,9 @@ def make_obs(thumb_x=0.5, index_x=0.8, middle_x=0.8) -> HandObservation:
     landmarks[17] = Point3(0.5, 0.6, 0.0) # palm_span = 0.1
 
     # thumb, index, middle
-    landmarks[4] = Point3(thumb_x, 0.5, 0.0)
-    landmarks[8] = Point3(index_x, 0.5, 0.0)
-    landmarks[12] = Point3(middle_x, 0.5, 0.0)
+    landmarks[4] = Point3(thumb_x, thumb_y, 0.0)
+    landmarks[8] = Point3(index_x, index_y, 0.0)
+    landmarks[12] = Point3(middle_x, middle_y, 0.0)
 
     return HandObservation(
         frame_id=1,
@@ -52,7 +59,8 @@ def test_open_to_pressed_after_close_confirm_frames() -> None:
     second = detector.update(obs, now_ms=10)
 
     assert detector._left_state == GestureState.PINCH_PRESSED
-    assert any(c.gesture == "drag_hold" for c in second)
+    assert first == []
+    assert second == []
 
 def test_short_pinch_does_not_press() -> None:
     detector = make_detector()
@@ -89,8 +97,28 @@ def test_hold_to_emit_click_on_release() -> None:
     c2 = detector.update(open_obs, now_ms=40)
 
     assert detector._left_state == GestureState.COOLDOWN
-    assert any(c.gesture == "drag_release" for c in c2)
     assert any(c.gesture == "click_left" for c in c2)
+    assert not any(c.gesture == "drag_hold" for c in c2)
+    assert not any(c.gesture == "drag_release" for c in c2)
+
+def test_drag_starts_only_after_hold_and_movement_threshold() -> None:
+    detector = make_detector()
+    closed = make_obs(thumb_x=0.5, index_x=0.53)
+    moved_while_pinched = make_obs(thumb_x=0.68, index_x=0.71)
+    open_obs = make_obs(thumb_x=0.5, index_x=0.6)
+
+    detector.update(closed, now_ms=0)
+    detector.update(closed, now_ms=10)
+    detector.update(closed, now_ms=20)
+
+    drag_start = detector.update(moved_while_pinched, now_ms=30)
+    detector.update(open_obs, now_ms=40)
+    release = detector.update(open_obs, now_ms=50)
+
+    assert detector._left_state == GestureState.COOLDOWN
+    assert any(c.gesture == "drag_hold" for c in drag_start)
+    assert any(c.gesture == "drag_release" for c in release)
+    assert not any(c.gesture == "click_left" for c in release)
 
 def test_double_click_requires_two_releases() -> None:
     detector = make_detector()
