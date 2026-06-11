@@ -67,7 +67,14 @@ def main() -> None:
 
     try:
         camera.open()
-        tracker = HandTracker(num_hands=1)
+        running_mode_str = getattr(config.camera, "running_mode", "video")
+        from mediapipe.tasks.python import vision
+        tracker_mode = (
+            vision.RunningMode.LIVE_STREAM
+            if running_mode_str == "live_stream"
+            else vision.RunningMode.VIDEO
+        )
+        tracker = HandTracker(running_mode=tracker_mode, num_hands=1)
 
         pointer = PointerEngine(
             PointerEngineConfig(

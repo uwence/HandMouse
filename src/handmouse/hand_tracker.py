@@ -44,6 +44,7 @@ class HandTracker:
         min_tracking_confidence: float = 0.5,
         model_path: str | Path | None = None,
         static_image_mode: bool | None = None,
+        result_callback: Any = None,
     ) -> None:
         try:
             import mediapipe as mp
@@ -70,19 +71,31 @@ class HandTracker:
                     else vision.RunningMode.VIDEO
                 )
 
-        resolved_model_path = _resolve_model_path(model_path)
-        options = vision.HandLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=str(resolved_model_path)),
-            running_mode=running_mode,
-            num_hands=num_hands,
-            min_hand_detection_confidence=min_hand_detection_confidence,
-            min_hand_presence_confidence=min_hand_presence_confidence,
-            min_tracking_confidence=min_tracking_confidence,
-        )
         self._mp = mp
         self._running_mode = running_mode
         self._image_mode = vision.RunningMode.IMAGE
         self._live_stream_mode = getattr(vision.RunningMode, "LIVE_STREAM", None)
+        self._user_callback = result_callback
+
+        def _wrapper_callback(result, output_image, timestamp_ms):
+            converted = self._convert_result(result)
+            if self._user_callback:
+                self._user_callback(converted, output_image, timestamp_ms)
+
+        resolved_model_path = _resolve_model_path(model_path)
+        
+        options_kwargs = {
+            "base_options": BaseOptions(model_asset_path=str(resolved_model_path)),
+            "running_mode": running_mode,
+            "num_hands": num_hands,
+            "min_hand_detection_confidence": min_hand_detection_confidence,
+            "min_hand_presence_confidence": min_hand_presence_confidence,
+            "min_tracking_confidence": min_tracking_confidence,
+        }
+        if running_mode == self._live_stream_mode:
+            options_kwargs["result_callback"] = _wrapper_callback
+
+        options = vision.HandLandmarkerOptions(**options_kwargs)
         self._landmarker = vision.HandLandmarker.create_from_options(options)
         self._hands = self._landmarker
 
@@ -129,7 +142,33 @@ class HandTracker:
 
             result = self._landmarker.detect_for_video(image, frame_timestamp_ms)
 
-        if not result.hand_landmarks:
+        return self._convert_result(result)
+
+    def process_async(
+        self,
+        frame_bgr: Any,
+        frame_timestamp_ms: int,
+    ) -> None:
+        if self._running_mode != self._live_stream_mode:
+            raise RuntimeError(
+                "HandTracker.process_async() is only supported in LIVE_STREAM mode."
+            )
+        try:
+            import cv2
+        except ImportError as exc:
+            raise RuntimeError(
+                "OpenCV is required to convert camera frames for MediaPipe."
+            ) from exc
+
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        image = self._mp.Image(
+            image_format=self._mp.ImageFormat.SRGB,
+            data=frame_rgb,
+        )
+        self._landmarker.detect_async(image, frame_timestamp_ms)
+
+    def _convert_result(self, result: Any) -> HandTrackingResult:
+        if not result or not getattr(result, "hand_landmarks", None):
             return HandTrackingResult(
                 landmarks=[],
                 thumb_tip=None,

@@ -161,3 +161,80 @@ def test_mouse_controller_failsafe(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(MouseFailsafeTriggered):
         mouse.move(ScreenPoint(0, 0))
+
+
+def test_inference_worker_live_stream_mode() -> None:
+    # Set up mock camera
+    mock_camera = MagicMock()
+    mock_camera.config = CameraConfig(width=640, height=480, index=0, fps_target=100)
+    mock_camera.read.return_value = (True, "mock_frame")
+
+    # Set up mock tracker
+    mock_tracker = MagicMock()
+    
+    # Mock that it's running in LIVE_STREAM mode
+    class FakeRunningMode:
+        LIVE_STREAM = 1
+        VIDEO = 2
+    mock_tracker._running_mode = 1
+    
+    # Store the registered callback
+    registered_callback = None
+    def register_callback(callback):
+        nonlocal registered_callback
+        registered_callback = callback
+    mock_tracker.register_callback = register_callback
+
+    # Monkeypatch to avoid real mediapipe RunningMode import crash
+    import sys
+    from types import ModuleType
+    mp_tasks = ModuleType("mediapipe.tasks.python.vision")
+    mp_tasks.RunningMode = FakeRunningMode
+    sys.modules["mediapipe.tasks.python.vision"] = mp_tasks
+    sys.modules["mediapipe.tasks.python"] = ModuleType("mediapipe.tasks.python")
+    sys.modules["mediapipe.tasks"] = ModuleType("mediapipe.tasks")
+    sys.modules["mediapipe"] = ModuleType("mediapipe")
+
+    reader = CameraReader(mock_camera)
+    worker = InferenceWorker(reader, mock_tracker)
+
+    # Verify callback was registered on tracker
+    assert registered_callback is not None
+
+    # Put a frame in the reader's buffer
+    reader.buffer.set("test_frame", 1234)
+
+    # Mock process_async
+    process_async_calls = []
+    def process_async(frame, timestamp):
+        process_async_calls.append((frame, timestamp))
+    mock_tracker.process_async = process_async
+
+    # Trigger worker.run logic for one frame
+    if reader.buffer.wait_new_frame(timeout=0.1):
+        reader.buffer.clear()
+        frame, timestamp_ms = reader.buffer.get()
+        assert frame == "test_frame"
+        assert timestamp_ms == 1234
+        
+        # Simulating run() block
+        if worker._is_live_stream:
+            with worker._frame_lock:
+                worker._frame_cache[timestamp_ms] = frame
+            worker.tracker.process_async(frame, timestamp_ms)
+
+    assert len(process_async_calls) == 1
+    assert process_async_calls[0] == ("test_frame", 1234)
+    assert worker._frame_cache[1234] == "test_frame"
+
+    # Now simulate callback firing from tracker
+    registered_callback("mock_result", None, 1234)
+
+    # Verify the result buffer is populated correctly
+    res, frame, ts = worker.buffer.get()
+    assert res == "mock_result"
+    assert frame == "test_frame"
+    assert ts == 1234
+    
+    # Verify the frame cache is cleaned up
+    assert 1234 not in worker._frame_cache

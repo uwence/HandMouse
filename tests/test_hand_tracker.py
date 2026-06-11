@@ -188,3 +188,63 @@ def test_video_mode_timestamp_monotonic_passes(monkeypatch: pytest.MonkeyPatch) 
     tracker.process([[0]], 101)
 
     assert [timestamp for _, timestamp in landmarker.calls] == [100, 101]
+
+
+def test_live_stream_mode_async_processing(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = FakeResult(
+        hand_landmarks=[_build_hand_landmarks()],
+        handedness=[[FakeClassification("Left", 0.88)]],
+    )
+    
+    # We subclass FakeLandmarker to support detect_async
+    class LiveStreamFakeLandmarker(FakeLandmarker):
+        def __init__(self, res) -> None:
+            super().__init__(res)
+            self.detect_async_calls = []
+
+        def detect_async(self, mp_image, timestamp_ms):
+            self.detect_async_calls.append((mp_image, timestamp_ms))
+
+    landmarker = LiveStreamFakeLandmarker(result)
+    fake_mp = install_fake_mediapipe(monkeypatch, landmarker)
+    monkeypatch.setitem(sys.modules, "cv2", FakeCV2())
+
+    # User callback to catch the converted result
+    received_results = []
+    def user_callback(converted, output_image, timestamp_ms):
+        received_results.append((converted, timestamp_ms))
+
+    # Initialize tracker in LIVE_STREAM mode
+    tracker = HandTracker(
+        running_mode=fake_mp.vision.RunningMode.LIVE_STREAM,
+        model_path="/tmp/hand_landmarker.task",
+        result_callback=user_callback
+    )
+
+    # Verify options registered callback wrapper
+    options = fake_mp.factory.last_options
+    assert options.kwargs["running_mode"] == fake_mp.vision.RunningMode.LIVE_STREAM
+    assert "result_callback" in options.kwargs
+    wrapper_callback = options.kwargs["result_callback"]
+
+    # Verify process() throws error in LIVE_STREAM mode
+    with pytest.raises(RuntimeError, match="does not support LIVE_STREAM"):
+        tracker.process([[1]])
+
+    # Call process_async
+    tracker.process_async([[1, 2]], 999)
+
+    assert len(landmarker.detect_async_calls) == 1
+    assert landmarker.detect_async_calls[0][1] == 999
+    assert landmarker.detect_async_calls[0][0].data == ["rgb", [[1, 2]]]
+
+    # Simulate callback from MediaPipe
+    wrapper_callback(result, "dummy_mp_image", 999)
+
+    # Verify user callback received the unified result
+    assert len(received_results) == 1
+    converted_result, ts = received_results[0]
+    assert ts == 999
+    assert converted_result.handedness_label == "Left"
+    assert converted_result.handedness_confidence == pytest.approx(0.88)
+    assert len(converted_result.landmarks) == 21

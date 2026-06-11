@@ -35,6 +35,7 @@ def dict_to_app_config(d: dict) -> AppConfig:
         buffer_size=cam_d.get("buffer_size", 1),
         fps_target=cam_d.get("fps_target", 60),
         input_is_mirrored=cam_d.get("input_is_mirrored", cam_d.get("mirror_input", False)),
+        running_mode=cam_d.get("running_mode", "video"),
     )
     
     view_d = d.get("view", {})

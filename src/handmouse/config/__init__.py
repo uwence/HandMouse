@@ -14,6 +14,7 @@ class CameraConfig:
     buffer_size: int = 1
     fps_target: int = 60
     input_is_mirrored: bool = False
+    running_mode: str = "video"  # "video" or "live_stream"
 
 @dataclass(frozen=True)
 class ViewConfig:

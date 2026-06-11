@@ -95,6 +95,31 @@ class InferenceWorker(threading.Thread):
         self.tracker = tracker
         self.buffer = ResultBuffer()
         self._stop_event = threading.Event()
+        
+        # Frame cache for matching timestamps in LIVE_STREAM callback
+        self._frame_lock = threading.Lock()
+        self._frame_cache = {}
+
+        from mediapipe.tasks.python import vision
+        self._is_live_stream = getattr(self.tracker, "_running_mode", None) == getattr(vision.RunningMode, "LIVE_STREAM", None)
+
+        if self._is_live_stream:
+            # Register our callback on the tracker
+            if hasattr(self.tracker, "register_callback"):
+                self.tracker.register_callback(self._on_async_result)
+
+    def _on_async_result(self, result: Any, output_image: Any, timestamp_ms: int) -> None:
+        with self._frame_lock:
+            frame = self._frame_cache.pop(timestamp_ms, None)
+            
+            # Prevent memory leaks: clean up old frames if we accumulate too many
+            if len(self._frame_cache) > 100:
+                sorted_keys = sorted(self._frame_cache.keys())
+                for k in sorted_keys[:-30]:
+                    self._frame_cache.pop(k, None)
+
+        if frame is not None:
+            self.buffer.set(result, frame, timestamp_ms)
 
     def run(self) -> None:
         while not self._stop_event.is_set():
@@ -103,8 +128,13 @@ class InferenceWorker(threading.Thread):
                 frame, timestamp_ms = self.reader.buffer.get()
                 if frame is not None:
                     try:
-                        result = self.tracker.process(frame, frame_timestamp_ms=timestamp_ms)
-                        self.buffer.set(result, frame, timestamp_ms)
+                        if self._is_live_stream:
+                            with self._frame_lock:
+                                self._frame_cache[timestamp_ms] = frame
+                            self.tracker.process_async(frame, timestamp_ms)
+                        else:
+                            result = self.tracker.process(frame, frame_timestamp_ms=timestamp_ms)
+                            self.buffer.set(result, frame, timestamp_ms)
                     except Exception:
                         pass
 
