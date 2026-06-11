@@ -32,67 +32,85 @@ class MouseController:
         if not self._control_enabled or point is None:
             return
 
+        self._dispatch_move(point)
+
+    def _dispatch_move(self, point: ScreenPoint) -> None:
         import sys
         if sys.platform == "win32":
-            import ctypes
-            try:
-                ctypes.windll.user32.SetCursorPos(int(point.x), int(point.y))
-                # Firing MOUSEEVENTF_MOVE (0x0001) forces Windows to register movement
-                ctypes.windll.user32.mouse_event(0x0001, 0, 0, 0, 0)
-                
-                # Check failsafe corner condition
-                if pyautogui is not None and pyautogui.FAILSAFE:
-                    if int(point.x) == 0 and int(point.y) == 0:
-                        raise MouseFailsafeTriggered(
-                            "PyAutoGUI failsafe triggered; disabling real mouse control."
-                        )
-            except Exception as exc:
-                if isinstance(exc, MouseFailsafeTriggered):
-                    raise
-                raise
+            self._move_windows(point)
         else:
-            backend = self._backend()
-            try:
-                backend.moveTo(point.x, point.y, duration=0)
-            except Exception as exc:
-                if self._is_failsafe_exception(exc):
+            self._move_pyautogui(point)
+
+    def _move_windows(self, point: ScreenPoint) -> None:
+        import ctypes
+        try:
+            ctypes.windll.user32.SetCursorPos(int(point.x), int(point.y))
+            # Firing MOUSEEVENTF_MOVE (0x0001) forces Windows to register movement
+            ctypes.windll.user32.mouse_event(0x0001, 0, 0, 0, 0)
+
+            # Check failsafe corner condition
+            if pyautogui is not None and pyautogui.FAILSAFE:
+                if int(point.x) == 0 and int(point.y) == 0:
                     raise MouseFailsafeTriggered(
                         "PyAutoGUI failsafe triggered; disabling real mouse control."
-                    ) from exc
-                raise
+                    )
+        except MouseFailsafeTriggered:
+            raise
+        except Exception:
+            raise
+
+    def _move_pyautogui(self, point: ScreenPoint) -> None:
+        backend = self._backend()
+        try:
+            backend.moveTo(point.x, point.y, duration=0)
+        except Exception as exc:
+            if self._is_failsafe_exception(exc):
+                raise MouseFailsafeTriggered(
+                    "PyAutoGUI failsafe triggered; disabling real mouse control."
+                ) from exc
+            raise
 
     def move_relative(self, delta: ScreenDelta | None) -> None:
         if not self._control_enabled or delta is None:
             return
 
+        self._dispatch_move_relative(delta)
+
+    def _dispatch_move_relative(self, delta: ScreenDelta) -> None:
         import sys
         if sys.platform == "win32":
-            import ctypes
-            try:
-                # MOUSEEVENTF_MOVE = 0x0001
-                ctypes.windll.user32.mouse_event(0x0001, int(delta.dx), int(delta.dy), 0, 0)
-                
-                # Check failsafe corner condition
-                if pyautogui is not None and pyautogui.FAILSAFE:
-                    pos = pyautogui.position()
-                    if pos.x == 0 and pos.y == 0:
-                        raise MouseFailsafeTriggered(
-                            "PyAutoGUI failsafe triggered; disabling real mouse control."
-                        )
-            except Exception as exc:
-                if isinstance(exc, MouseFailsafeTriggered):
-                    raise
-                raise
+            self._move_relative_windows(delta)
         else:
-            backend = self._backend()
-            try:
-                backend.moveRel(delta.dx, delta.dy, duration=0)
-            except Exception as exc:
-                if self._is_failsafe_exception(exc):
+            self._move_relative_pyautogui(delta)
+
+    def _move_relative_windows(self, delta: ScreenDelta) -> None:
+        import ctypes
+        try:
+            # MOUSEEVENTF_MOVE = 0x0001
+            ctypes.windll.user32.mouse_event(0x0001, int(delta.dx), int(delta.dy), 0, 0)
+
+            # Check failsafe corner condition
+            if pyautogui is not None and pyautogui.FAILSAFE:
+                pos = pyautogui.position()
+                if pos.x == 0 and pos.y == 0:
                     raise MouseFailsafeTriggered(
                         "PyAutoGUI failsafe triggered; disabling real mouse control."
-                    ) from exc
-                raise
+                    )
+        except MouseFailsafeTriggered:
+            raise
+        except Exception:
+            raise
+
+    def _move_relative_pyautogui(self, delta: ScreenDelta) -> None:
+        backend = self._backend()
+        try:
+            backend.moveRel(delta.dx, delta.dy, duration=0)
+        except Exception as exc:
+            if self._is_failsafe_exception(exc):
+                raise MouseFailsafeTriggered(
+                    "PyAutoGUI failsafe triggered; disabling real mouse control."
+                ) from exc
+            raise
 
     def left_click(self) -> None:
         if not self._control_enabled:

@@ -24,6 +24,19 @@ def test_clutch_release_exits_immediately() -> None:
     assert released.movement_enabled is False
 
 
+def test_pose_loss_before_active_returns_to_neutral() -> None:
+    """If move_pose drops during ARMED (before arm_dwell_ms elapses), the
+    controller must return to NEUTRAL so the user can re-engage cleanly."""
+    controller = MoveModeController(MoveModeConfig(arm_dwell_ms=100, pose_loss_grace_ms=80))
+
+    armed = controller.update(clutch_down=True, move_pose=True, now_ms=0)
+    lost = controller.update(clutch_down=True, move_pose=False, now_ms=50)
+
+    assert armed.state is MoveModeState.ARMED
+    assert lost.state is MoveModeState.NEUTRAL
+    assert lost.movement_enabled is False
+
+
 def test_brief_pose_loss_during_active_does_not_enable_other_modes() -> None:
     controller = MoveModeController(MoveModeConfig(arm_dwell_ms=100, pose_loss_grace_ms=80))
 
@@ -31,5 +44,9 @@ def test_brief_pose_loss_during_active_does_not_enable_other_modes() -> None:
     controller.update(clutch_down=True, move_pose=True, now_ms=120)
     lost = controller.update(clutch_down=True, move_pose=False, now_ms=150)
 
-    assert lost.state is MoveModeState.ARMED
+    assert lost.state is MoveModeState.ACTIVE
     assert lost.movement_enabled is False
+
+    expired = controller.update(clutch_down=True, move_pose=False, now_ms=240)
+    assert expired.state is MoveModeState.NEUTRAL
+    assert expired.movement_enabled is False

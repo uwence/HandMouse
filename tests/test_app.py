@@ -9,6 +9,7 @@ import handmouse.app as app_module
 from handmouse.app import _mirror_frame, _run_loop
 from handmouse.clutch_input import ClutchSnapshot
 from handmouse.mouse_controller import MouseFailsafeTriggered
+from handmouse.interlock import InteractionInterlock
 from handmouse.move_mode import MoveModeResult, MoveModeState
 from handmouse.types import FramePoint, ScreenDelta
 
@@ -102,8 +103,8 @@ class FakeShortcutDetector:
         self.reset_calls = 0
         self.update_calls: list[tuple[object, int]] = []
 
-    def update(self, point: object, now_ms: int) -> object:
-        self.update_calls.append((point, now_ms))
+    def update(self, point: object, now_ms: int, palm_open: bool = False) -> object:
+        self.update_calls.append((point, now_ms, palm_open))
         return SimpleNamespace(action=None)
 
     def reset(self) -> None:
@@ -317,6 +318,7 @@ def test_run_loop_resets_shortcut_detector_when_inactive() -> None:
         mouse=mouse,
         shortcut=shortcut,
         debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
     )
 
     assert shortcut_detector.reset_calls == 1
@@ -358,6 +360,7 @@ def test_run_loop_resets_shortcut_detector_when_grab_pose_blocks_swipe() -> None
         mouse=FakeMouse(),
         shortcut=FakeShortcutController(),
         debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
     )
 
     assert shortcut_detector.reset_calls == 1
@@ -397,6 +400,7 @@ def test_run_loop_aborts_cleanly_on_mouse_failsafe() -> None:
         mouse=mouse,
         shortcut=shortcut,
         debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
     )
 
     assert engagement.force_idle_calls == 1
@@ -448,6 +452,7 @@ def test_run_loop_suppresses_pinch_when_hand_pose_is_grab_like() -> None:
         mouse=FakeMouse(),
         shortcut=FakeShortcutController(),
         debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
     )
 
     assert gesture.calls[0][0] is None
@@ -477,7 +482,7 @@ def test_run_loop_moves_only_when_clutch_down_and_mode_active() -> None:
             make_engagement_result(active=False, state="IDLE", reason="escape"),
         ]
     )
-    clutch_input = FakeClutchInput([ClutchSnapshot(clutch_down=True)])
+    clutch_input = FakeClutchInput([ClutchSnapshot(clutch_down=True), ClutchSnapshot(clutch_down=True)])
     move_mode = FakeMoveMode(
         [
             make_move_mode_result(
@@ -502,6 +507,7 @@ def test_run_loop_moves_only_when_clutch_down_and_mode_active() -> None:
         mouse=mouse,
         shortcut=FakeShortcutController(),
         debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
         clutch_input=clutch_input,
         move_mode=move_mode,
     )
@@ -544,7 +550,8 @@ def test_run_loop_blocks_click_and_scroll_while_move_mode_active() -> None:
         mouse=FakeMouse(),
         shortcut=shortcut,
         debug_view=FakeDebugView(),
-        clutch_input=FakeClutchInput([ClutchSnapshot(clutch_down=True)]),
+        interlock=InteractionInterlock(),
+        clutch_input=FakeClutchInput([ClutchSnapshot(clutch_down=True), ClutchSnapshot(clutch_down=True)]),
         move_mode=FakeMoveMode(
             [
                 make_move_mode_result(
@@ -592,7 +599,8 @@ def test_run_loop_passes_clutch_and_move_mode_telemetry() -> None:
         mouse=FakeMouse(),
         shortcut=FakeShortcutController(),
         debug_view=debug_view,
-        clutch_input=FakeClutchInput([ClutchSnapshot(clutch_down=True)]),
+        interlock=InteractionInterlock(),
+        clutch_input=FakeClutchInput([ClutchSnapshot(clutch_down=True), ClutchSnapshot(clutch_down=True)]),
         move_mode=FakeMoveMode(
             [
                 make_move_mode_result(

@@ -23,9 +23,9 @@ def test_camera_open_and_read(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_cv2.CAP_PROP_FRAME_HEIGHT = 4
     mock_cv2.CAP_PROP_FPS = 5
     mock_cv2.CAP_PROP_BUFFERSIZE = 38
+    mock_cv2.flip.side_effect = lambda frame, code: frame
 
-    monkeypatch.setattr("cv2.VideoCapture", mock_cv2.VideoCapture)
-    monkeypatch.setattr(sys, "modules", {**sys.modules, "cv2": mock_cv2})
+    monkeypatch.setitem(sys.modules, "cv2", mock_cv2)
 
     config = CameraConfig(width=640, height=480, index=0, backend_preference=("CAP_DSHOW",))
     camera = Camera(config)
@@ -102,6 +102,8 @@ def test_camera_reader_and_inference_worker_threads() -> None:
 
 
 def test_mouse_controller_pyautogui_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(MouseController, "_dispatch_move", lambda self, p: self._move_pyautogui(p))
+    monkeypatch.setattr(MouseController, "_dispatch_move_relative", lambda self, d: self._move_relative_pyautogui(d))
     mock_pyautogui = MagicMock()
     
     class FakeFailSafeException(Exception):
@@ -144,6 +146,7 @@ def test_mouse_controller_pyautogui_calls(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_mouse_controller_failsafe(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(MouseController, "_dispatch_move", lambda self, p: self._move_pyautogui(p))
     mock_pyautogui = MagicMock()
     
     class FakeFailSafeException(Exception):

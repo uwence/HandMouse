@@ -5,6 +5,12 @@ from typing import Any
 from handmouse.hand_tracker import HandTrackingResult
 from handmouse.types import FramePoint
 
+# Mutable debug metrics written by app._is_palm_facing_camera and read by
+# debug_view. Defined at module level so writers don't need to do
+# `hasattr` checks and so the value is always a str (never the absence of
+# an attribute).
+DEBUG_CROSS: str = ""
+
 def unify_hand_result(raw_result: HandTrackingResult, input_is_mirrored: bool) -> HandTrackingResult:
     """Unify the hand tracking result into an absolute physical coordinate space.
     

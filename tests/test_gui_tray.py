@@ -22,8 +22,10 @@ class MockIcon:
     def run(self) -> None:
         self.run_called = True
 
-    def run_detached(self) -> None:
+    def run_detached(self, setup=None) -> None:
         self.run_called = True
+        if setup is not None:
+            setup(self)
 
     def stop(self) -> None:
         self.stop_called = True
@@ -101,6 +103,9 @@ def test_gui_run_and_save(monkeypatch: pytest.MonkeyPatch) -> None:
         def protocol(self, name, func) -> None:
             self.protocol_funcs[name] = func
 
+        def winfo_exists(self) -> bool:
+            return True
+
         def mainloop(self) -> None:
             pass
 
@@ -128,6 +133,7 @@ def test_gui_run_and_save(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Mock tkinter classes & methods
     monkeypatch.setattr(tk, "Tk", MockTk)
+    monkeypatch.setattr(tk, "Toplevel", lambda master: MockTk())
     monkeypatch.setattr(tk, "StringVar", MockVar)
     monkeypatch.setattr(tk, "DoubleVar", MockVar)
     monkeypatch.setattr(tk, "BooleanVar", MockVar)
@@ -151,7 +157,8 @@ def test_gui_run_and_save(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("tkinter.messagebox.showerror", mock_messagebox.showerror)
 
     # Trigger GUI run in the same thread for testing
-    gui_module._run_gui()
+    root = MockTk()
+    gui_module._build_settings_ui(root)
 
     # Verify we captured the callbacks
     assert save_callback is not None

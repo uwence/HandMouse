@@ -124,6 +124,7 @@ def main() -> None:
                     mouse=mouse,
                     shortcut=shortcut,
                     debug_view=debug_view,
+                    interlock=interlock,
                     clutch_input=clutch_input,
                     move_mode=move_mode,
                     clutch_status=clutch_status,
@@ -198,6 +199,7 @@ def _run_loop(
     mouse: MouseController,
     shortcut: ShortcutController,
     debug_view: DebugView,
+    interlock: InteractionInterlock,
     clutch_input: Any | None = None,
     move_mode: Any | None = None,
     clutch_status: str | None = None,
@@ -654,35 +656,32 @@ def _is_palm_facing_camera(landmarks: list[Any] | None, handedness_label: str | 
 
     palm_width = _dist(index_mcp, pinky_mcp)
     palm_height = _dist(wrist, middle_mcp)
-    
+
     if palm_height == 0:
         return False
-        
+
     # 1. Sideways check
     if (palm_width / palm_height) < 0.30:
         return False
-        
+
     # 2. Back of hand check
     if handedness_label is not None:
         is_left = (handedness_label.lower() == "left")
-        
+
         v1_x = index_mcp.x - wrist.x
         v1_y = index_mcp.y - wrist.y
         v2_x = pinky_mcp.x - wrist.x
         v2_y = pinky_mcp.y - wrist.y
-        
+
         cross = v1_x * v2_y - v1_y * v2_x
-        
+
         # In the Unified Physical Space (X increases physical right, Y increases physical down):
         # Physical Left Hand, Palm Facing: Thumb is Right, Pinky is Left -> Index is Right(x>0), Pinky is Left(x<0)
         # v1=(+x, -y), v2=(-x, -y) -> cross = (+)*(-) - (-)*(-) = (-) -> cross < 0
         # Physical Right Hand, Palm Facing: Thumb is Left, Pinky is Right -> Index is Left(x<0), Pinky is Right(x>0)
         # v1=(-x, -y), v2=(+x, -y) -> cross = (-)*(-) - (-)*(+) = (+) -> cross > 0
-        # print(f"DEBUG: is_left={is_left}, cross={cross:.4f}")
         # Pass the metrics to some global debug state so we can render them on OSD
         debug_metrics = f"v1=({v1_x:.2f},{v1_y:.2f}) v2=({v2_x:.2f},{v2_y:.2f}) c={cross:.3f} L={is_left}"
-        if not hasattr(coordinate_mapper, "DEBUG_CROSS"):
-            coordinate_mapper.DEBUG_CROSS = ""
         coordinate_mapper.DEBUG_CROSS = debug_metrics
 
         if is_left:
@@ -691,8 +690,11 @@ def _is_palm_facing_camera(landmarks: list[Any] | None, handedness_label: str | 
         else:
             if cross >= 0:  # Back of right hand
                 return False
-        
-        return True
+
+    # Without handedness_label we cannot distinguish palm from back-of-hand;
+    # fall through to the sideways check only. Caller should treat falsy as
+    # "unverified" rather than assuming palm-facing.
+    return handedness_label is not None
 
 
 def _is_finger_curled(landmarks: list[Any] | None, mcp_idx: int, tip_idx: int) -> bool:
