@@ -186,15 +186,12 @@ class HandTracker:
         selected_index = 0
         selected_raw_landmarks = result.hand_landmarks[selected_index]
         label, confidence = self._handedness(result, selected_index)
-        landmarks = [
-            FramePoint(landmark.x, landmark.y)
-            for landmark in selected_raw_landmarks
-        ]
+        landmarks = self._frame_points(selected_raw_landmarks)
 
         world_landmarks = None
         if hasattr(result, "hand_world_landmarks") and result.hand_world_landmarks:
             world_raw = result.hand_world_landmarks[selected_index]
-            world_landmarks = [Point3(x=lm.x, y=lm.y, z=lm.z) for lm in world_raw]
+            world_landmarks = self._point3_list(world_raw)
 
         return HandTrackingResult(
             landmarks=landmarks,
@@ -222,6 +219,27 @@ class HandTracker:
         if index >= len(landmarks):
             return None
         return landmarks[index]
+
+    @staticmethod
+    def _frame_points(raw_landmarks: list[Any]) -> list[FramePoint]:
+        return [
+            FramePoint(
+                float(getattr(landmark, "x", 0.0)),
+                float(getattr(landmark, "y", 0.0)),
+            )
+            for landmark in raw_landmarks
+        ]
+
+    @staticmethod
+    def _point3_list(raw_landmarks: list[Any]) -> list[Point3]:
+        return [
+            Point3(
+                x=float(getattr(landmark, "x", 0.0)),
+                y=float(getattr(landmark, "y", 0.0)),
+                z=float(getattr(landmark, "z", 0.0)),
+            )
+            for landmark in raw_landmarks
+        ]
 
     @staticmethod
     def _handedness(result: Any, selected_index: int) -> tuple[str | None, float | None]:

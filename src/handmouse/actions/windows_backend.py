@@ -5,6 +5,7 @@ from typing import Any
 import pyautogui
 
 from handmouse.policy.gesture_policy import GestureIntent
+from handmouse.telemetry.schema import build_action_dispatch
 
 @dataclass(frozen=True)
 class ActionDispatch:
@@ -109,11 +110,14 @@ class ActionRouter:
             ))
             try:
                 from handmouse.telemetry.writer import log_event
-                log_event("action_dispatch", {
-                    "action": intent.action,
-                    "executed": executed,
-                    "blocked_by": blocked_by,
-                })
+                log_event(
+                    "action_dispatch",
+                    build_action_dispatch(
+                        action=intent.action,
+                        executed=executed,
+                        blocked_by=blocked_by,
+                    ),
+                )
             except Exception:
                 pass
             

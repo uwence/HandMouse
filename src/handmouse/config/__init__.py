@@ -71,11 +71,19 @@ class ExtendedGrabScrollConfig:
 
 
 @dataclass(frozen=True)
+class PolicyConfig:
+    high_risk_cooldown_ms: int = 500
+    explicit_confirm_required: bool = True
+
+
+@dataclass(frozen=True)
 class AppConfig:
     camera: CameraConfig
     pointer: PointerConfig
     shortcut: ShortcutConfig
     clutch: ClutchConfig
+    schema_version: int = 2
+    policy: PolicyConfig = PolicyConfig()
     gesture_switches: GestureSwitches = GestureSwitches()
     gesture_config: ExtendedGestureConfig = ExtendedGestureConfig()
     grab_scroll_config: ExtendedGrabScrollConfig = ExtendedGrabScrollConfig()
@@ -109,6 +117,8 @@ DEFAULT_CONFIG = AppConfig(
     clutch=ClutchConfig(
         key_name="ctrl_r",
     ),
+    schema_version=2,
+    policy=PolicyConfig(),
     gesture_switches=GestureSwitches(),
     gesture_config=ExtendedGestureConfig(),
     grab_scroll_config=ExtendedGrabScrollConfig(),

@@ -1,5 +1,6 @@
 import tempfile
 import os
+import pytest
 from handmouse.config import (
     DEFAULT_CONFIG,
     AppConfig,
@@ -14,6 +15,7 @@ from handmouse.config import (
     load_or_create_config,
     save_config,
 )
+from handmouse.config.schema import dict_to_app_config
 
 
 def test_load_nonexistent_config_creates_default() -> None:
@@ -59,3 +61,13 @@ def test_load_corrupt_config_returns_default() -> None:
             
         config = load_or_create_config(config_file)
         assert config == DEFAULT_CONFIG
+
+
+def test_config_schema_version_defaults_to_v2() -> None:
+    config = dict_to_app_config({})
+    assert config.schema_version == 2
+
+
+def test_invalid_high_risk_cooldown_is_rejected() -> None:
+    with pytest.raises(ValueError):
+        dict_to_app_config({"policy": {"high_risk_cooldown_ms": -1}})

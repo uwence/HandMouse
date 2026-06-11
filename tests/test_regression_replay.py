@@ -13,6 +13,8 @@ from handmouse.grab_scroll_detector import GrabScrollDetector, GrabScrollConfig
 from handmouse.alt_tab_detector import AltTabDetector
 from handmouse.actions.windows_backend import ActionRouter
 from handmouse.interlock import InteractionInterlock
+from handmouse.policy.gesture_policy import GestureIntent
+from handmouse.replay.runner import ReplayRunner
 from handmouse.types import FramePoint
 
 
@@ -95,7 +97,7 @@ def build_alt_tab_landmarks(x_offset: float = 0.0) -> list[list[float]]:
     return points
 
 
-def run_pipeline_simulation(landmarks_series) -> list[str]:
+def run_pipeline_simulation(landmarks_series) -> dict[str, object]:
     interlock = InteractionInterlock()
     gesture = GestureDetector(GestureConfig(pinch_close_ratio=0.5, pinch_open_ratio=0.7), interlock=interlock)
     grab_scroll = GrabScrollDetector(
@@ -115,7 +117,7 @@ def run_pipeline_simulation(landmarks_series) -> list[str]:
     mock_shortcut = MagicMock()
     router = ActionRouter(mock_mouse, mock_shortcut)
 
-    dispatched_actions = []
+    records = []
 
     # Run loop
     for idx, lms in enumerate(landmarks_series):
@@ -147,14 +149,36 @@ def run_pipeline_simulation(landmarks_series) -> list[str]:
             lms_points = [FramePoint(lm[0], lm[1]) for lm in lms]
             candidates.extend(alt_tab.update(lms_points, now_ms))
 
-        intents = policy.evaluate(obs, quality, candidates, {})
+        decisions = policy.evaluate(obs, quality, candidates, {"now_ms": now_ms})
+        for decision in decisions:
+            records.append({
+                "event": "gesture_decision",
+                "action": decision.action,
+                "committed": decision.committed,
+                "blocked_by": decision.payload.get("blocked_by"),
+            })
+        intents = [
+            GestureIntent(
+                action=decision.action,
+                risk=decision.risk,
+                detector=decision.detector,
+                committed=True,
+                payload=decision.payload,
+            )
+            for decision in decisions
+            if decision.committed
+        ]
         dispatches = router.dispatch(intents, {})
 
         for d in dispatches:
-            if d.executed:
-                dispatched_actions.append(d.action)
+            records.append({
+                "event": "action_dispatch",
+                "action": d.action,
+                "executed": d.executed,
+                "blocked_by": d.blocked_by,
+            })
 
-    return dispatched_actions
+    return ReplayRunner.summarize_records(records)
 
 
 def test_regression_click_flow(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -172,12 +196,12 @@ def test_regression_click_flow(monkeypatch: pytest.MonkeyPatch) -> None:
     for _ in range(3):
         series.append(build_open_hand_landmarks())
 
-    actions = run_pipeline_simulation(series)
+    report = run_pipeline_simulation(series)
     
     # A normal click should not synthesize drag events.
-    assert "click_left" in actions
-    assert "drag_hold" not in actions
-    assert "drag_release" not in actions
+    assert report["committed"]["click_left"] == 1
+    assert report["committed"].get("drag_hold", 0) == 0
+    assert report["committed"].get("drag_release", 0) == 0
 
 
 def test_regression_scroll_flow(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -198,8 +222,8 @@ def test_regression_scroll_flow(monkeypatch: pytest.MonkeyPatch) -> None:
     for _ in range(2):
         series.append(build_open_hand_landmarks())
 
-    actions = run_pipeline_simulation(series)
-    assert "scroll" in actions
+    report = run_pipeline_simulation(series)
+    assert report["committed"]["scroll"] >= 1
 
 
 def test_regression_alt_tab_and_navigation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,8 +245,8 @@ def test_regression_alt_tab_and_navigation(monkeypatch: pytest.MonkeyPatch) -> N
     commit[4] = [commit[8][0] + 0.01, commit[8][1]]
     series.append(commit)
 
-    actions = run_pipeline_simulation(series)
+    report = run_pipeline_simulation(series)
     
-    assert "task_view" in actions
-    assert "nav_left" in actions
-    assert "task_view_commit" in actions
+    assert report["committed"]["task_view"] == 1
+    assert report["committed"]["nav_left"] >= 1
+    assert report["committed"]["task_view_commit"] == 1

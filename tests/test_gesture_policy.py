@@ -58,71 +58,123 @@ def test_policy_blocks_disabled_feature_switches(
     )
     policy = GesturePolicy()
 
-    intents = policy.evaluate(None, make_quality(ok=True), [make_candidate(action, risk)], {})
+    decisions = policy.evaluate(None, make_quality(ok=True), [make_candidate(action, risk)], {})
 
-    assert intents == []
+    assert len(decisions) == 1
+    assert decisions[0].committed is False
+    assert decisions[0].payload["blocked_by"] == "feature_disabled"
 
 
 def test_policy_blocks_medium_risk_when_quality_is_bad() -> None:
     policy = GesturePolicy()
 
-    intents = policy.evaluate(
+    decisions = policy.evaluate(
         None,
         make_quality(ok=False, score=0.25),
         [make_candidate("click_left", RiskClass.MEDIUM)],
         {},
     )
 
-    assert intents == []
+    assert len(decisions) == 1
+    assert decisions[0].committed is False
+    assert decisions[0].payload["blocked_by"] == "quality_gate"
 
 
 def test_policy_allows_drag_release_even_when_quality_is_bad() -> None:
     policy = GesturePolicy()
 
-    intents = policy.evaluate(
+    decisions = policy.evaluate(
         None,
         make_quality(ok=False, score=0.25),
         [make_candidate("drag_release", RiskClass.MEDIUM)],
         {},
     )
 
-    assert [intent.action for intent in intents] == ["drag_release"]
+    assert [decision.action for decision in decisions if decision.committed] == ["drag_release"]
 
 
 def test_policy_requires_explicit_confirm_for_task_view_commit() -> None:
     policy = GesturePolicy()
 
-    intents = policy.evaluate(
+    decisions = policy.evaluate(
         None,
         make_quality(ok=True),
         [make_candidate("task_view_commit", RiskClass.HIGH)],
         {},
     )
 
-    assert intents == []
+    assert len(decisions) == 1
+    assert decisions[0].committed is False
+    assert decisions[0].payload["blocked_by"] == "explicit_confirm_required"
 
 
 def test_policy_allows_explicit_confirmed_task_view_commit() -> None:
     policy = GesturePolicy()
 
-    intents = policy.evaluate(
+    decisions = policy.evaluate(
         None,
         make_quality(ok=True),
         [make_candidate("task_view_commit", RiskClass.HIGH, explicit_confirm=1.0)],
         {},
     )
 
-    assert [intent.action for intent in intents] == ["task_view_commit"]
+    assert [decision.action for decision in decisions if decision.committed] == ["task_view_commit"]
 
 
 def test_policy_allows_task_view_cancel_when_quality_is_bad() -> None:
     policy = GesturePolicy()
 
-    intents = policy.evaluate(
+    decisions = policy.evaluate(
         None,
         make_quality(ok=False, score=0.1),
         [make_candidate("task_view_cancel", RiskClass.HIGH)],
         {},
     )
 
-    assert [intent.action for intent in intents] == ["task_view_cancel"]
+    assert [decision.action for decision in decisions if decision.committed] == ["task_view_cancel"]
+
+
+def test_policy_blocks_high_risk_during_cooldown() -> None:
+    policy = GesturePolicy(high_risk_cooldown_ms=500)
+    quality = make_quality(ok=True)
+
+    first = policy.evaluate(
+        None,
+        quality,
+        [make_candidate("task_view", RiskClass.HIGH)],
+        {"now_ms": 1000},
+    )
+    second = policy.evaluate(
+        None,
+        quality,
+        [make_candidate("task_view", RiskClass.HIGH)],
+        {"now_ms": 1100},
+    )
+
+    assert [decision.action for decision in first if decision.committed] == ["task_view"]
+    assert len(second) == 1
+    assert second[0].committed is False
+    assert second[0].payload["blocked_by"] == "cooldown"
+
+
+def test_policy_records_blocked_reason_for_disabled_feature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        config_module,
+        "ACTIVE_CONFIG",
+        replace(
+            config_module.ACTIVE_CONFIG,
+            gesture_switches=replace(GestureSwitches(), win_d=False),
+        ),
+    )
+    policy = GesturePolicy()
+
+    decision = policy.decide_candidate(
+        make_candidate("swipe_left_palm", RiskClass.HIGH),
+        make_quality(ok=True),
+        {"now_ms": 1000},
+    )
+
+    assert decision.committed is False
+    assert decision.payload["blocked_by"] == "feature_disabled"

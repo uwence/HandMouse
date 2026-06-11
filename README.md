@@ -13,7 +13,7 @@ Windows-native Python prototype for controlling the mouse with webcam-based hand
 | Camera | 1280×720 default | **640×480**, DSHOW→MSMF→ANY, buffer=1 |
 | Hand pose errors | ignored | palm-open required for engagement |
 
-93/93 tests pass. See `docs/research/handmouse-v2-design.md` for the design rationale.
+The automated test suite currently passes in local verification. See `docs/research/handmouse-v2-design.md` for the design rationale.
 
 ## Windows Setup
 
@@ -37,7 +37,7 @@ When you run the app, you will now see a **System Tray Icon**.
   - **Profiles**: Switch between `Default`, `Aggressive`, and `Conservative` profiles on the fly.
   - **Toggle Active/Idle**: Manually engage/disengage mouse control.
 
-All settings are automatically saved to `~/.handmouse/config.yaml`. Telemetry is also recorded in the background to `~/.handmouse/telemetry/` as NDJSON for later analysis.
+All settings are automatically saved to `~/.handmouse/config.yaml`. Telemetry is also recorded in the background to `~/.handmouse/telemetry/` as NDJSON for later analysis. New recordings use telemetry `schema_version: 2`.
 
 First run downloads the MediaPipe hand landmarker model (~7.5 MB) to `%USERPROFILE%\.handmouse\models\hand_landmarker.task`. To pre-place it:
 
@@ -165,6 +165,12 @@ You can adjust the parameters visually via the System Tray **Settings** menu, or
 
 If you prefer to edit the configuration manually, you can open `~/.handmouse/config.yaml`. Any missing fields will be safely populated with defaults.
 
+Hardening-related defaults now include:
+
+- `schema_version: 2`
+- `policy.high_risk_cooldown_ms: 500`
+- `policy.explicit_confirm_required: true`
+
 | Knob | Where | What it does | Default |
 |---|---|---|---|
 | `CameraConfig.width/height` | `config.py` | Capture resolution | 640×480 |
@@ -237,11 +243,11 @@ src/handmouse/
 ├── mouse_controller.py   PyAutoGUI wrapper with FAILSAFE
 ├── shortcut_controller.py  Translates swipe actions to keys / scroll
 ├── debug_view.py         OpenCV overlay: status panel + pinch bar
-├── config.py             DEFAULT_CONFIG dataclass
+├── config/               YAML-backed config schema, defaults, and profiles
 └── app.py                Main loop wiring everything together
 ```
 
-Read order if you want to understand the code: `config.py` → `engagement.py` → `pointer_engine.py` → `gesture_detector.py` → `grab_scroll_detector.py` → `app.py`.
+Read order if you want to understand the code: `config/__init__.py` → `engagement.py` → `pointer_engine.py` → `gesture_detector.py` → `grab_scroll_detector.py` → `app.py`.
 
 ## Research
 

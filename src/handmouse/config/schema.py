@@ -4,7 +4,7 @@ from typing import Any
 from handmouse.config import (
     CameraConfig, ViewConfig, ControlRegion, PointerConfig,
     ShortcutConfig, ClutchConfig, GestureSwitches,
-    ExtendedGestureConfig, ExtendedGrabScrollConfig, AppConfig,
+    ExtendedGestureConfig, ExtendedGrabScrollConfig, PolicyConfig, AppConfig,
     SUPPORTED_BACKENDS
 )
 
@@ -26,6 +26,10 @@ def dataclass_to_dict(obj: Any) -> Any:
         return obj
 
 def dict_to_app_config(d: dict) -> AppConfig:
+    schema_version = int(d.get("schema_version", 2))
+    if schema_version < 1:
+        raise ValueError("schema_version must be >= 1")
+
     cam_d = d.get("camera", {})
     camera = CameraConfig(
         width=cam_d.get("width", 640),
@@ -89,11 +93,22 @@ def dict_to_app_config(d: dict) -> AppConfig:
         scroll_sensitivity=gscfg_d.get("scroll_sensitivity", 180.0),
     )
 
+    policy_d = d.get("policy", {})
+    high_risk_cooldown_ms = int(policy_d.get("high_risk_cooldown_ms", 500))
+    if high_risk_cooldown_ms < 0:
+        raise ValueError("policy.high_risk_cooldown_ms must be >= 0")
+    policy = PolicyConfig(
+        high_risk_cooldown_ms=high_risk_cooldown_ms,
+        explicit_confirm_required=bool(policy_d.get("explicit_confirm_required", True)),
+    )
+
     return AppConfig(
         camera=camera,
         pointer=pointer,
         shortcut=shortcut,
         clutch=clutch,
+        schema_version=schema_version,
+        policy=policy,
         gesture_switches=gesture_switches,
         gesture_config=gesture_config,
         grab_scroll_config=grab_scroll_config,

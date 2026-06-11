@@ -125,11 +125,22 @@ def test_cooldown_prevents_immediate_subsequent_swipes() -> None:
     assert len(second) == 1
 
 
-def test_palm_open_modifiers_applied() -> None:
+def test_palm_swipe_requires_open_palm_hold_before_upgrade() -> None:
     detector = make_detector()
 
     detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5), palm_open=True)
     result = detector.update(make_obs(), now_ms=100, point=FramePoint(0.1, 0.5))
+
+    assert len(result) == 1
+    assert result[0].gesture == "swipe_left"
+
+
+def test_palm_swipe_upgrades_after_sustained_open_palm() -> None:
+    detector = make_detector()
+
+    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5), palm_open=True)
+    detector.update(make_obs(), now_ms=80, point=FramePoint(0.5, 0.5), palm_open=True)
+    result = detector.update(make_obs(), now_ms=160, point=FramePoint(0.1, 0.5), palm_open=False)
 
     assert len(result) == 1
     assert result[0].gesture == "swipe_left_palm"

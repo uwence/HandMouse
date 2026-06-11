@@ -12,11 +12,12 @@ from handmouse.types import FramePoint
 DEBUG_CROSS: str = ""
 
 def unify_hand_result(raw_result: HandTrackingResult, input_is_mirrored: bool) -> HandTrackingResult:
-    """Unify the hand tracking result into an absolute physical coordinate space.
+    """Unify the hand tracking result into the runtime image-space contract.
     
-    In the Unified Physical Space, X=0 is always the physical left side of the user,
-    and X=1 is the physical right side. This means moving the physical hand to the
-    right always increases X.
+    Current contract:
+    - ``landmarks`` are image-space points whose X increases toward the user's physical right.
+    - ``raw_landmarks`` keep the original MediaPipe objects so image-space Z is still available upstream.
+    - ``world_landmarks`` stay in MediaPipe world coordinates and are never mirrored or rewritten here.
     
     Because camera.py now forces all frames to be mirrored before inference,
     the raw landmarks are already in a mirrored coordinate space. In a mirrored

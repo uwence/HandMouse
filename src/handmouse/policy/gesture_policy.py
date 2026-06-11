@@ -30,33 +30,77 @@ class GestureIntent:
     committed: bool
     payload: dict[str, Any] = field(default_factory=dict)
 
+@dataclass(frozen=True)
+class GestureDecision:
+    action: str
+    risk: RiskClass
+    detector: str
+    committed: bool
+    payload: dict[str, Any] = field(default_factory=dict)
+
 class GesturePolicy:
+    def __init__(self, high_risk_cooldown_ms: int = 500) -> None:
+        self.high_risk_cooldown_ms = high_risk_cooldown_ms
+        self._last_high_risk_ms = -1
+
     def evaluate(
         self,
         obs: HandObservation | None,
         quality: TrackingQuality,
         candidates: list[GestureCandidate],
         session_state: dict[str, Any],
-    ) -> list[GestureIntent]:
-        intents = []
+    ) -> list[GestureDecision]:
+        decisions = []
+        now_ms = int(session_state.get("now_ms", 0))
         for c in candidates:
             if c.phase != "fire" and c.phase != "cancel":
                 continue
-            if not self._feature_enabled(c.gesture):
-                continue
-            if self._requires_explicit_confirm(c.gesture) and not c.measurements.get("explicit_confirm"):
-                continue
-            if self._requires_quality_ok(c.gesture) and not quality.ok:
-                continue
+            decision = self.decide_candidate(c, quality, {"now_ms": now_ms, **session_state})
+            decisions.append(decision)
+            if decision.committed and c.risk == RiskClass.HIGH and decision.action != "task_view_cancel":
+                self._last_high_risk_ms = now_ms
+        return decisions
 
-            intents.append(GestureIntent(
-                action=c.gesture,
-                risk=c.risk,
-                detector=c.detector,
-                committed=True,
-                payload=c.measurements
-            ))
-        return intents
+    def decide_candidate(
+        self,
+        candidate: GestureCandidate,
+        quality: TrackingQuality,
+        session_state: dict[str, Any],
+    ) -> GestureDecision:
+        now_ms = int(session_state.get("now_ms", 0))
+        blocked_by = self._blocked_reason(candidate, quality, now_ms)
+        payload = {**candidate.measurements}
+        if blocked_by is not None:
+            payload["blocked_by"] = blocked_by
+        return GestureDecision(
+            action=candidate.gesture,
+            risk=candidate.risk,
+            detector=candidate.detector,
+            committed=blocked_by is None,
+            payload=payload,
+        )
+
+    def _blocked_reason(
+        self,
+        candidate: GestureCandidate,
+        quality: TrackingQuality,
+        now_ms: int,
+    ) -> str | None:
+        if not self._feature_enabled(candidate.gesture):
+            return "feature_disabled"
+        if self._requires_explicit_confirm(candidate.gesture) and not candidate.measurements.get("explicit_confirm"):
+            return "explicit_confirm_required"
+        if self._requires_quality_ok(candidate.gesture) and not quality.ok:
+            return "quality_gate"
+        if (
+            candidate.risk == RiskClass.HIGH
+            and self._cooldown_applies(candidate.gesture)
+            and candidate.gesture != "task_view_cancel"
+            and self._last_high_risk_ms >= 0
+            and (now_ms - self._last_high_risk_ms) < self.high_risk_cooldown_ms
+        ):
+            return "cooldown"
+        return None
 
     def _feature_enabled(self, action: str) -> bool:
         switches = config_module.ACTIVE_CONFIG.gesture_switches
@@ -79,3 +123,11 @@ class GesturePolicy:
     @staticmethod
     def _requires_explicit_confirm(action: str) -> bool:
         return action == "task_view_commit"
+
+    @staticmethod
+    def _cooldown_applies(action: str) -> bool:
+        return action in {
+            "task_view",
+            "swipe_left_palm",
+            "swipe_right_palm",
+        }

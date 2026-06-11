@@ -64,9 +64,19 @@ class TrackingQualityGate:
         )
         if not handedness_ok:
             reasons.append("handedness_uncertain")
-            
+
+        penalties = 0.0
+        if "stale" in reasons:
+            penalties += 0.45
+        if "unstable" in reasons:
+            penalties += 0.30
+        if "palm_too_small" in reasons:
+            penalties += 0.25
+        if "handedness_uncertain" in reasons:
+            penalties += 0.20
+
+        score = max(0.0, 1.0 - penalties)
         ok = len(reasons) == 0
-        score = 1.0 if ok else 0.5
 
         return TrackingQuality(
             ok=ok,

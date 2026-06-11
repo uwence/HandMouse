@@ -35,9 +35,14 @@ from handmouse.alt_tab_detector import AltTabDetector, AltTabState
 import handmouse.coordinate_mapper as coordinate_mapper
 from handmouse.tracking.observation import HandObservation, Point3, TrackingQuality
 from handmouse.tracking.quality_gate import TrackingQualityGate
-from handmouse.policy.gesture_policy import GesturePolicy, GestureCandidate, RiskClass
+from handmouse.policy.gesture_policy import GesturePolicy, GestureCandidate, GestureIntent, RiskClass
 from handmouse.actions.windows_backend import ActionRouter
 from handmouse.shortcut_detector import ShortcutAction
+from handmouse.telemetry.schema import (
+    build_frame_sample,
+    build_gesture_candidate,
+    build_gesture_decision,
+)
 
 
 
@@ -104,7 +109,7 @@ def main() -> None:
         move_mode = MoveModeController(MoveModeConfig())
         debug_view = DebugView(config)
         quality_gate = TrackingQualityGate()
-        policy = GesturePolicy()
+        policy = GesturePolicy(config.policy.high_risk_cooldown_ms)
         action_router = ActionRouter(mouse, shortcut)
         
         from handmouse.osd import OSDManager
@@ -422,7 +427,7 @@ def _run_loop(
         if quality_gate is None:
             quality_gate = TrackingQualityGate()
         if policy is None:
-            policy = GesturePolicy()
+            policy = GesturePolicy(config.policy.high_risk_cooldown_ms)
         if action_router is None:
             action_router = ActionRouter(mouse, shortcut)
 
@@ -488,34 +493,35 @@ def _run_loop(
                 pointer.reset()
 
             if candidates:
-                intents = policy.evaluate(obs, quality, candidates, {})
+                decisions = policy.evaluate(obs, quality, candidates, {"now_ms": now_ms})
+                intents = [
+                    GestureIntent(
+                        action=decision.action,
+                        risk=decision.risk,
+                        detector=decision.detector,
+                        committed=True,
+                        payload=decision.payload,
+                    )
+                    for decision in decisions
+                    if decision.committed
+                ]
                 
                 try:
                     from handmouse.telemetry.writer import log_event
-                    # Log committed intents
-                    for intent in intents:
-                        log_event("gesture_decision", {
-                            "ts_ms": now_ms,
-                            "action": intent.action,
-                            "risk": intent.risk.value if hasattr(intent.risk, "value") else intent.risk,
-                            "detector": intent.detector,
-                            "committed": True,
-                            "blocked_by": None,
-                        })
-                    
-                    # Log blocked intents (candidates with phase="fire" that were NOT committed)
-                    committed_actions = {intent.action for intent in intents}
-                    for cand in candidates:
-                        if cand.phase == "fire" and cand.gesture not in committed_actions:
-                            blocked_by = "quality_gate_failed" if (cand.risk == RiskClass.HIGH and not quality.ok) else "unknown"
-                            log_event("gesture_decision", {
-                                "ts_ms": now_ms,
-                                "action": cand.gesture,
-                                "risk": cand.risk.value if hasattr(cand.risk, "value") else cand.risk,
-                                "detector": cand.detector,
-                                "committed": False,
-                                "blocked_by": blocked_by,
-                            })
+                    for decision in decisions:
+                        log_event(
+                            "gesture_decision",
+                            build_gesture_decision(
+                                ts_ms=now_ms,
+                                action=decision.action,
+                                risk=decision.risk.value if hasattr(decision.risk, "value") else decision.risk,
+                                detector=decision.detector,
+                                committed=decision.committed,
+                                blocked_by=decision.payload.get("blocked_by"),
+                                quality_score=quality.score,
+                                quality_reasons=quality.reasons,
+                            ),
+                        )
                 except Exception:
                     pass
 
@@ -569,28 +575,36 @@ def _run_loop(
 
         try:
             from handmouse.telemetry.writer import log_event
-            log_event("frame_sample", {
-                "ts_ms": now_ms,
-                "frame_capture_time": frame_capture_time,
-                "frame_age_ms": frame_age_ms,
-                "pointer_dx": dx,
-                "pointer_dy": dy,
-                "engagement_active": is_active,
-                "clutch_down": clutch_snapshot.clutch_down,
-                "move_mode": move_mode_result.state.name,
-                "hand_found": bool(hand_result and hand_result.landmarks),
-                "landmarks": [[lm.x, lm.y] for lm in hand_result.landmarks] if (hand_result and hand_result.landmarks) else [],
-                "world_landmarks": [[lm.x, lm.y, lm.z] for lm in hand_result.world_landmarks] if (hand_result and hand_result.world_landmarks) else None,
-            })
+            log_event(
+                "frame_sample",
+                build_frame_sample(
+                    ts_ms=now_ms,
+                    frame_capture_time=frame_capture_time,
+                    frame_age_ms=frame_age_ms,
+                    pointer_dx=dx,
+                    pointer_dy=dy,
+                    engagement_active=is_active,
+                    clutch_down=clutch_snapshot.clutch_down,
+                    move_mode=move_mode_result.state.name,
+                    hand_found=bool(hand_result and hand_result.landmarks),
+                    landmarks=[[lm.x, lm.y, lm.z] for lm in obs.image_landmarks] if obs else [],
+                    world_landmarks=[[lm.x, lm.y, lm.z] for lm in hand_result.world_landmarks] if (hand_result and hand_result.world_landmarks) else None,
+                    quality_score=quality.score,
+                    quality_reasons=quality.reasons,
+                ),
+            )
             
             for cand in candidates:
-                log_event("gesture_candidate", {
-                    "ts_ms": now_ms,
-                    "detector": cand.detector,
-                    "gesture": cand.gesture,
-                    "phase": cand.phase,
-                    "confidence": cand.confidence,
-                })
+                log_event(
+                    "gesture_candidate",
+                    build_gesture_candidate(
+                        ts_ms=now_ms,
+                        detector=cand.detector,
+                        gesture=cand.gesture,
+                        phase=cand.phase,
+                        confidence=cand.confidence,
+                    ),
+                )
         except Exception:
             pass
 

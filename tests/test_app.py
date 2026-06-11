@@ -6,12 +6,15 @@ from types import SimpleNamespace
 import pytest
 
 import handmouse.app as app_module
+import handmouse.coordinate_mapper as coordinate_mapper
 from handmouse.app import _is_palm_facing_camera, _mirror_frame, _run_loop
 from handmouse.clutch_input import ClutchSnapshot
+from handmouse.hand_tracker import HandTrackingResult
 from handmouse.mouse_controller import MouseFailsafeTriggered
 from handmouse.interlock import InteractionInterlock
 from handmouse.move_mode import MoveModeResult, MoveModeState
-from handmouse.tracking.observation import Point3
+from handmouse.policy.gesture_policy import GestureCandidate, RiskClass
+from handmouse.tracking.observation import Point3, TrackingQuality
 from handmouse.types import FramePoint, ScreenDelta
 
 
@@ -197,6 +200,14 @@ class FakeMoveMode:
         return self.results.pop(0)
 
 
+class FakeQualityGate:
+    def __init__(self, quality: TrackingQuality) -> None:
+        self.quality = quality
+
+    def update(self, obs: object, screen_width: int, screen_height: int) -> TrackingQuality:
+        return self.quality
+
+
 def make_hand_result(*, index_tip: FramePoint | None, landmarks: list[FramePoint] | None = None) -> object:
     return SimpleNamespace(
         landmarks=[] if landmarks is None else landmarks,
@@ -224,6 +235,19 @@ def make_palm_facing_landmarks(*, handedness: str) -> list[FramePoint]:
     landmarks[12] = FramePoint(0.5, 0.35)
     landmarks[16] = FramePoint(landmarks[17].x, 0.35)
     landmarks[20] = FramePoint(landmarks[17].x, 0.45)
+    return landmarks
+
+
+def make_back_of_hand_landmarks(*, handedness: str) -> list[FramePoint]:
+    landmarks = [FramePoint(0.5, 0.5)] * 21
+    landmarks[0] = FramePoint(0.5, 0.8)
+    landmarks[9] = FramePoint(0.5, 0.55)
+    if handedness == "Left":
+        landmarks[5] = FramePoint(0.35, 0.6)
+        landmarks[17] = FramePoint(0.65, 0.6)
+    else:
+        landmarks[5] = FramePoint(0.65, 0.6)
+        landmarks[17] = FramePoint(0.35, 0.6)
     return landmarks
 
 
@@ -398,6 +422,11 @@ def test_run_loop_preserves_landmark_z_and_logs_world_z(
     assert obs.image_landmarks[8].z == pytest.approx(raw_landmarks[8].z)
     frame_samples = [payload for event_name, payload in events if event_name == "frame_sample"]
     assert frame_samples
+    assert frame_samples[0]["schema_version"] == 2
+    assert frame_samples[0]["quality_score"] > 0.0
+    assert frame_samples[0]["landmarks"][8] == pytest.approx(
+        [landmarks[8].x, landmarks[8].y, raw_landmarks[8].z]
+    )
     assert frame_samples[0]["world_landmarks"][8] == pytest.approx(
         [world_landmarks[8].x, world_landmarks[8].y, world_landmarks[8].z]
     )
@@ -432,3 +461,105 @@ def test_palm_facing_left_hand_matches_cross_sign_comment() -> None:
 
 def test_palm_facing_right_hand_matches_cross_sign_comment() -> None:
     assert _is_palm_facing_camera(make_palm_facing_landmarks(handedness="Right"), "Right") is True
+
+
+def test_back_of_left_hand_is_rejected() -> None:
+    assert _is_palm_facing_camera(make_back_of_hand_landmarks(handedness="Left"), "Left") is False
+
+
+def test_back_of_right_hand_is_rejected() -> None:
+    assert _is_palm_facing_camera(make_back_of_hand_landmarks(handedness="Right"), "Right") is False
+
+
+def test_run_loop_logs_quality_reasons(monkeypatch: pytest.MonkeyPatch) -> None:
+    cv2 = FakeCv2(wait_keys=[0, ord("q")])
+    landmarks = make_palm_facing_landmarks(handedness="Left")
+    hand_result = SimpleNamespace(
+        landmarks=landmarks,
+        thumb_tip=landmarks[4],
+        index_tip=landmarks[8],
+        raw_landmarks=[SimpleNamespace(x=lm.x, y=lm.y, z=0.0) for lm in landmarks],
+        world_landmarks=None,
+        handedness_label="Left",
+        handedness_confidence=0.99,
+    )
+    events: list[tuple[str, object]] = []
+    monkeypatch.setattr(
+        "handmouse.telemetry.writer.log_event",
+        lambda event_name, payload: events.append((event_name, payload)),
+    )
+
+    _run_loop(
+        cv2=cv2,
+        camera=FakeCamera(frames=[object(), object()]),
+        tracker=FakeTracker([hand_result, hand_result]),
+        pointer=FakePointer(updates=[ScreenDelta(0, 0)]),
+        gesture=FakeGesture([[
+            GestureCandidate("test", "task_view", "fire", 1.0, RiskClass.HIGH, True),
+        ]]),
+        grab_scroll=FakeGrabScroll([[]]),
+        shortcut_detector=FakeShortcutDetector([[]]),
+        engagement=FakeEngagement(
+            [
+                make_engagement_result(active=True, state="ACTIVE"),
+                make_engagement_result(active=False, state="IDLE", reason="escape"),
+            ]
+        ),
+        mouse=FakeMouse(),
+        shortcut=FakeShortcutController(),
+        debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
+        quality_gate=FakeQualityGate(
+            TrackingQuality(
+                ok=False,
+                score=0.4,
+                reasons=("unstable",),
+                palm_span_px=120.0,
+                handedness_ok=True,
+                stable_frames=1,
+                lost_frames=0,
+            )
+        ),
+    )
+
+    decisions = [payload for event_name, payload in events if event_name == "gesture_decision"]
+    assert decisions
+    assert decisions[0]["quality_reasons"] == ["unstable"]
+
+
+def test_build_frame_sample_schema_contains_world_z_and_quality() -> None:
+    from handmouse.telemetry.schema import build_frame_sample
+
+    payload = build_frame_sample(
+        ts_ms=1000,
+        frame_age_ms=12,
+        pointer_dx=0.0,
+        pointer_dy=0.0,
+        landmarks=[[0.5, 0.5, 0.01]],
+        world_landmarks=[[0.1, 0.2, 0.3]],
+        quality_score=0.91,
+        quality_reasons=("stable",),
+    )
+
+    assert payload["schema_version"] == 2
+    assert payload["world_landmarks"][0] == [0.1, 0.2, 0.3]
+    assert payload["quality_score"] == 0.91
+
+
+def test_coordinate_mapper_preserves_physical_handedness_and_world_landmarks() -> None:
+    world_landmarks = [Point3(x=0.1, y=0.2, z=0.3)]
+    raw = HandTrackingResult(
+        landmarks=[FramePoint(0.25, 0.75)],
+        thumb_tip=None,
+        index_tip=None,
+        raw_landmarks=[SimpleNamespace(x=0.25, y=0.75, z=-0.1)],
+        world_landmarks=world_landmarks,
+        handedness_label="Right",
+        handedness_confidence=0.88,
+    )
+
+    unified = coordinate_mapper.unify_hand_result(raw, input_is_mirrored=False)
+
+    assert unified.handedness_label == "Right"
+    assert unified.landmarks[0] == FramePoint(0.25, 0.75)
+    assert unified.world_landmarks == world_landmarks

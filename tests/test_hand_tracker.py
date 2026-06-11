@@ -9,9 +9,10 @@ from handmouse.hand_tracker import HandTracker
 
 
 class FakeLandmark:
-    def __init__(self, x: float, y: float) -> None:
+    def __init__(self, x: float, y: float, z: float = 0.0) -> None:
         self.x = x
         self.y = y
+        self.z = z
 
 
 class FakeClassification:
@@ -21,9 +22,15 @@ class FakeClassification:
 
 
 class FakeResult:
-    def __init__(self, hand_landmarks: list[list[FakeLandmark]], handedness: list[list[FakeClassification]]) -> None:
+    def __init__(
+        self,
+        hand_landmarks: list[list[FakeLandmark]],
+        handedness: list[list[FakeClassification]],
+        hand_world_landmarks: list[list[FakeLandmark]] | None = None,
+    ) -> None:
         self.hand_landmarks = hand_landmarks
         self.handedness = handedness
+        self.hand_world_landmarks = hand_world_landmarks or []
 
 
 class FakeLandmarker:
@@ -112,8 +119,12 @@ class FakeCV2(ModuleType):
         return ["rgb", frame_bgr]
 
 
-def _build_hand_landmarks() -> list[FakeLandmark]:
-    return [FakeLandmark(i / 10.0, i / 20.0) for i in range(21)]
+def _build_hand_landmarks(*, z_scale: float = -0.01) -> list[FakeLandmark]:
+    return [FakeLandmark(i / 10.0, i / 20.0, i * z_scale) for i in range(21)]
+
+
+def _build_world_landmarks() -> list[FakeLandmark]:
+    return [FakeLandmark(i / 100.0, i / 200.0, i / 300.0) for i in range(21)]
 
 
 def test_video_mode_processes_valid_frame(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -248,3 +259,22 @@ def test_live_stream_mode_async_processing(monkeypatch: pytest.MonkeyPatch) -> N
     assert converted_result.handedness_label == "Left"
     assert converted_result.handedness_confidence == pytest.approx(0.88)
     assert len(converted_result.landmarks) == 21
+
+
+def test_convert_result_preserves_image_and_world_z(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = FakeResult(
+        hand_landmarks=[_build_hand_landmarks(z_scale=-0.03)],
+        handedness=[[FakeClassification("Left", 0.99)]],
+        hand_world_landmarks=[_build_world_landmarks()],
+    )
+    landmarker = FakeLandmarker(result)
+    install_fake_mediapipe(monkeypatch, landmarker)
+    monkeypatch.setitem(sys.modules, "cv2", FakeCV2())
+
+    tracker = HandTracker(model_path="/tmp/hand_landmarker.task")
+    output = tracker.process([[1, 2], [3, 4]], 12345)
+
+    assert output.raw_landmarks[0].z == pytest.approx(0.0)
+    assert output.raw_landmarks[8].z == pytest.approx(-0.24)
+    assert output.world_landmarks is not None
+    assert output.world_landmarks[8].z == pytest.approx(8 / 300.0)
