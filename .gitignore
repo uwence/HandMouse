@@ -7,3 +7,10 @@ __pycache__/
 .ruff_cache/
 build/
 dist/
+.claude/
+.vscode/
+tests/video_review/
+tests/video_review_2/
+tests/*.mp4
+uv.lock
+.coverage

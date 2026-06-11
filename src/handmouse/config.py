@@ -1,4 +1,8 @@
 from dataclasses import dataclass
+import json
+import os
+
+SUPPORTED_BACKENDS: tuple[str, ...] = ("CAP_DSHOW", "CAP_MSMF", "CAP_ANY")
 
 
 @dataclass(frozen=True)
@@ -6,6 +10,14 @@ class CameraConfig:
     width: int
     height: int
     index: int
+    backend_preference: tuple[str, ...] = SUPPORTED_BACKENDS
+    buffer_size: int = 1
+    fps_target: int = 60
+    input_is_mirrored: bool = False
+
+@dataclass(frozen=True)
+class ViewConfig:
+    render_mirrored: bool = True
 
 
 @dataclass(frozen=True)
@@ -20,40 +32,207 @@ class ControlRegion:
 
 @dataclass(frozen=True)
 class PointerConfig:
-    smoothing: float
-    dead_zone_px: float
     control_region: ControlRegion
-    relative_sensitivity: float = 1.4
+    g_hi: float = 3.0  # pointer speed/gain max
 
 
 @dataclass(frozen=True)
-class GestureConfig:
-    # Thresholds are normalized distances, not pixels, so camera resolution can vary.
-    pinch_threshold: float
-    hold_ms: int
+class ShortcutConfig:
+    min_distance: float
+    max_duration_ms: int
     cooldown_ms: int
-    release_threshold: float
+    axis_ratio: float
+
+
+@dataclass(frozen=True)
+class ClutchConfig:
+    key_name: str = "ctrl_r"
+
+
+@dataclass(frozen=True)
+class GestureSwitches:
+    right_click: bool = True
+    double_click: bool = True
+    drag_drop: bool = True
+    alt_tab: bool = True
+    win_d: bool = True
+
+
+@dataclass(frozen=True)
+class ExtendedGestureConfig:
+    pinch_close: float = 0.05
+    pinch_open: float = 0.075
+
+
+@dataclass(frozen=True)
+class ExtendedGrabScrollConfig:
+    scroll_sensitivity: float = 180.0
 
 
 @dataclass(frozen=True)
 class AppConfig:
     camera: CameraConfig
     pointer: PointerConfig
-    gesture: GestureConfig
+    shortcut: ShortcutConfig
+    clutch: ClutchConfig
+    gesture_switches: GestureSwitches = GestureSwitches()
+    gesture_config: ExtendedGestureConfig = ExtendedGestureConfig()
+    grab_scroll_config: ExtendedGrabScrollConfig = ExtendedGrabScrollConfig()
+    view: ViewConfig = ViewConfig()
+    show_osd: bool = True
 
 
 DEFAULT_CONFIG = AppConfig(
-    camera=CameraConfig(width=1280, height=720, index=0),
+    camera=CameraConfig(
+        width=640,
+        height=480,
+        index=0,
+        backend_preference=SUPPORTED_BACKENDS,
+        buffer_size=1,
+        fps_target=60,
+        input_is_mirrored=False,
+    ),
+    view=ViewConfig(
+        render_mirrored=True,
+    ),
     pointer=PointerConfig(
-        smoothing=0.35,
-        dead_zone_px=4.0,
         control_region=ControlRegion(left=0.12, top=0.10, right=0.88, bottom=0.90),
-        relative_sensitivity=1.4,
+        g_hi=3.0,
     ),
-    gesture=GestureConfig(
-        pinch_threshold=0.05,
-        hold_ms=120,
-        cooldown_ms=350,
-        release_threshold=0.08,
+    shortcut=ShortcutConfig(
+        min_distance=0.18,
+        max_duration_ms=900,
+        cooldown_ms=700,
+        axis_ratio=1.4,
     ),
+    clutch=ClutchConfig(
+        key_name="ctrl_r",
+    ),
+    gesture_switches=GestureSwitches(),
+    gesture_config=ExtendedGestureConfig(),
+    grab_scroll_config=ExtendedGrabScrollConfig(),
 )
+
+CONFIG_PATH = os.path.expanduser("~/.handmouse/config.json")
+
+
+def dataclass_to_dict(obj):
+    import dataclasses
+    if dataclasses.is_dataclass(obj):
+        result = {}
+        for f in dataclasses.fields(obj):
+            value = getattr(obj, f.name)
+            result[f.name] = dataclass_to_dict(value)
+        return result
+    elif isinstance(obj, tuple):
+        return tuple(dataclass_to_dict(x) for x in obj)
+    elif isinstance(obj, list):
+        return [dataclass_to_dict(x) for x in obj]
+    elif isinstance(obj, dict):
+        return {k: dataclass_to_dict(v) for k, v in obj.items()}
+    else:
+        return obj
+
+
+def dict_to_app_config(d: dict) -> AppConfig:
+    cam_d = d.get("camera", {})
+    camera = CameraConfig(
+        width=cam_d.get("width", 640),
+        height=cam_d.get("height", 480),
+        index=cam_d.get("index", 0),
+        backend_preference=tuple(cam_d.get("backend_preference", SUPPORTED_BACKENDS)),
+        buffer_size=cam_d.get("buffer_size", 1),
+        fps_target=cam_d.get("fps_target", 60),
+        input_is_mirrored=cam_d.get("input_is_mirrored", cam_d.get("mirror_input", False)),
+    )
+    
+    view_d = d.get("view", {})
+    view = ViewConfig(
+        render_mirrored=view_d.get("render_mirrored", d.get("camera", {}).get("mirror_input", True))
+    )
+
+    ptr_d = d.get("pointer", {})
+    cr_d = ptr_d.get("control_region", {})
+    control_region = ControlRegion(
+        left=cr_d.get("left", 0.12),
+        top=cr_d.get("top", 0.10),
+        right=cr_d.get("right", 0.88),
+        bottom=cr_d.get("bottom", 0.90),
+    )
+    pointer = PointerConfig(
+        control_region=control_region,
+        g_hi=ptr_d.get("g_hi", 3.0),
+    )
+
+    sh_d = d.get("shortcut", {})
+    shortcut = ShortcutConfig(
+        min_distance=sh_d.get("min_distance", 0.18),
+        max_duration_ms=sh_d.get("max_duration_ms", 900),
+        cooldown_ms=sh_d.get("cooldown_ms", 700),
+        axis_ratio=sh_d.get("axis_ratio", 1.4),
+    )
+
+    cl_d = d.get("clutch", {})
+    clutch = ClutchConfig(
+        key_name=cl_d.get("key_name", "ctrl_r"),
+    )
+
+    sw_d = d.get("gesture_switches", {})
+    gesture_switches = GestureSwitches(
+        right_click=sw_d.get("right_click", True),
+        double_click=sw_d.get("double_click", True),
+        drag_drop=sw_d.get("drag_drop", True),
+        alt_tab=sw_d.get("alt_tab", True),
+        win_d=sw_d.get("win_d", True),
+    )
+
+    gcfg_d = d.get("gesture_config", {})
+    gesture_config = ExtendedGestureConfig(
+        pinch_close=gcfg_d.get("pinch_close", 0.05),
+        pinch_open=gcfg_d.get("pinch_open", 0.075),
+    )
+
+    gscfg_d = d.get("grab_scroll_config", {})
+    grab_scroll_config = ExtendedGrabScrollConfig(
+        scroll_sensitivity=gscfg_d.get("scroll_sensitivity", 180.0),
+    )
+
+    return AppConfig(
+        camera=camera,
+        pointer=pointer,
+        shortcut=shortcut,
+        clutch=clutch,
+        gesture_switches=gesture_switches,
+        gesture_config=gesture_config,
+        grab_scroll_config=grab_scroll_config,
+        view=view,
+        show_osd=d.get("show_osd", True),
+    )
+
+
+def load_or_create_config(path: str = CONFIG_PATH) -> AppConfig:
+    if not os.path.exists(path):
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            save_config(DEFAULT_CONFIG, path)
+        except Exception as exc:
+            print(f"WARNING: failed to create config directory/file: {exc}")
+        return DEFAULT_CONFIG
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+            return dict_to_app_config(d)
+    except Exception as exc:
+        print(f"WARNING: failed to load config from {path}: {exc}. Using defaults.")
+        return DEFAULT_CONFIG
+
+ACTIVE_CONFIG = load_or_create_config()
+
+
+def save_config(config: AppConfig, path: str = CONFIG_PATH) -> None:
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(dataclass_to_dict(config), f, indent=4)
+    except Exception as exc:
+        print(f"ERROR: failed to save config to {path}: {exc}")

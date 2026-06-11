@@ -11,6 +11,8 @@ dependencies = [
   "opencv-python>=4.13.0.92",
   "mediapipe>=0.10.35",
   "pyautogui>=0.9.54",
+  "pynput>=1.7.7",
+  "pystray>=0.19.5",
 ]
 
 [project.optional-dependencies]
