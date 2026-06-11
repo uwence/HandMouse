@@ -25,6 +25,7 @@ class HandTrackingResult:
     thumb_tip: FramePoint | None
     index_tip: FramePoint | None
     raw_landmarks: Any | None
+    world_landmarks: list[FramePoint] | None
     handedness_label: str | None
     handedness_confidence: float | None
 
@@ -134,6 +135,7 @@ class HandTracker:
                 thumb_tip=None,
                 index_tip=None,
                 raw_landmarks=None,
+                world_landmarks=None,
                 handedness_label=None,
                 handedness_confidence=None,
             )
@@ -146,11 +148,17 @@ class HandTracker:
             for landmark in selected_raw_landmarks
         ]
 
+        world_landmarks = None
+        if hasattr(result, "hand_world_landmarks") and result.hand_world_landmarks:
+            world_raw = result.hand_world_landmarks[selected_index]
+            world_landmarks = [FramePoint(lm.x, lm.y) for lm in world_raw]
+
         return HandTrackingResult(
             landmarks=landmarks,
             thumb_tip=self._landmark_at(landmarks, self.THUMB_TIP),
             index_tip=self._landmark_at(landmarks, self.INDEX_TIP),
             raw_landmarks=selected_raw_landmarks,
+            world_landmarks=world_landmarks,
             handedness_label=label,
             handedness_confidence=confidence,
         )

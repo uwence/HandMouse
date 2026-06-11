@@ -19,58 +19,7 @@ from handmouse.config import (
     save_config,
 )
 
-_gui_lock = threading.Lock()
-import queue
-
-_gui_queue = queue.Queue()
-_gui_thread_started = False
 _gui_window = None
-
-def _start_gui_thread_if_needed():
-    global _gui_thread_started
-    with _gui_lock:
-        if not _gui_thread_started:
-            threading.Thread(target=_gui_thread_worker, daemon=True).start()
-            _gui_thread_started = True
-
-def open_settings_in_thread() -> None:
-    """Request the settings GUI to open via the persistent background thread."""
-    _start_gui_thread_if_needed()
-    _gui_queue.put("SHOW_SETTINGS")
-
-def open_about_in_thread() -> None:
-    """Request the about dialog to open via the persistent background thread."""
-    _start_gui_thread_if_needed()
-    _gui_queue.put("SHOW_ABOUT")
-
-def _gui_thread_worker():
-    root = tk.Tk()
-    root.withdraw() # Hide the root window initially
-    
-    def check_queue():
-        try:
-            while True:
-                msg = _gui_queue.get_nowait()
-                if msg == "SHOW_SETTINGS":
-                    _build_settings_ui(root)
-                elif msg == "SHOW_ABOUT":
-                    _build_about_ui(root)
-        except queue.Empty:
-            pass
-        root.after(100, check_queue)
-        
-    root.after(100, check_queue)
-    root.mainloop()
-
-def _build_about_ui(root):
-    messagebox.showinfo(
-        "About HandMouse",
-        "HandMouse V3\n\n"
-        "Windows hand gesture controller using webcam & MediaPipe.\n"
-        "Status: Active (Green) / Idle (Gray)\n\n"
-        "Developed as a premium desktop utility.",
-        parent=root
-    )
 
 def _build_settings_ui(root) -> None:
     global _gui_window
@@ -139,8 +88,8 @@ def _build_settings_ui(root) -> None:
     input_is_mirrored_var = tk.BooleanVar(master=top, value=config.camera.input_is_mirrored)
     render_mirrored_var = tk.BooleanVar(master=top, value=config.view.render_mirrored)
     speed_var = tk.DoubleVar(master=top, value=config.pointer.g_hi)
-    pinch_close_var = tk.DoubleVar(master=top, value=config.gesture_config.pinch_close)
-    pinch_open_var = tk.DoubleVar(master=top, value=config.gesture_config.pinch_open)
+    pinch_close_var = tk.DoubleVar(master=top, value=config.gesture_config.pinch_close_ratio)
+    pinch_open_var = tk.DoubleVar(master=top, value=config.gesture_config.pinch_open_ratio)
     scroll_sens_var = tk.DoubleVar(master=top, value=config.grab_scroll_config.scroll_sensitivity)
 
     switches = config.gesture_switches
@@ -205,7 +154,7 @@ def _build_settings_ui(root) -> None:
 
     row3 = tk.Frame(card3, bg=card_color)
     row3.pack(fill="x", padx=10, pady=5)
-    tk.Label(row3, text="Pinch Close Threshold:", bg=card_color, fg=text_color).pack(side="left")
+    tk.Label(row3, text="Pinch Close Ratio:", bg=card_color, fg=text_color).pack(side="left")
     pinch_close_lbl = tk.Label(row3, text=f"{pinch_close_var.get():.3f}", bg=card_color, fg=accent_color, width=6)
     pinch_close_lbl.pack(side="right")
     
@@ -213,7 +162,7 @@ def _build_settings_ui(root) -> None:
         pinch_close_lbl.config(text=f"{float(val):.3f}")
         
     pinch_close_scale = tk.Scale(
-        row3, from_=0.01, to=0.15, resolution=0.005, orient="horizontal",
+        row3, from_=0.2, to=0.8, resolution=0.01, orient="horizontal",
         variable=pinch_close_var, bg=card_color, fg=text_color, troughcolor=entry_bg,
         activebackground=accent_color, highlightthickness=0, bd=0, showvalue=False,
         command=_update_close_lbl
@@ -222,7 +171,7 @@ def _build_settings_ui(root) -> None:
 
     row4 = tk.Frame(card3, bg=card_color)
     row4.pack(fill="x", padx=10, pady=5)
-    tk.Label(row4, text="Pinch Open Threshold:", bg=card_color, fg=text_color).pack(side="left")
+    tk.Label(row4, text="Pinch Open Ratio:", bg=card_color, fg=text_color).pack(side="left")
     pinch_open_lbl = tk.Label(row4, text=f"{pinch_open_var.get():.3f}", bg=card_color, fg=accent_color, width=6)
     pinch_open_lbl.pack(side="right")
     
@@ -230,7 +179,7 @@ def _build_settings_ui(root) -> None:
         pinch_open_lbl.config(text=f"{float(val):.3f}")
         
     pinch_open_scale = tk.Scale(
-        row4, from_=0.02, to=0.20, resolution=0.005, orient="horizontal",
+        row4, from_=0.3, to=1.2, resolution=0.01, orient="horizontal",
         variable=pinch_open_var, bg=card_color, fg=text_color, troughcolor=entry_bg,
         activebackground=accent_color, highlightthickness=0, bd=0, showvalue=False,
         command=_update_open_lbl
@@ -294,8 +243,8 @@ def _build_settings_ui(root) -> None:
                 win_d=wd_var.get(),
             ),
             gesture_config=ExtendedGestureConfig(
-                pinch_close=pinch_close_var.get(),
-                pinch_open=pinch_open_var.get(),
+                pinch_close_ratio=pinch_close_var.get(),
+                pinch_open_ratio=pinch_open_var.get(),
             ),
             grab_scroll_config=ExtendedGrabScrollConfig(
                 scroll_sensitivity=scroll_sens_var.get(),

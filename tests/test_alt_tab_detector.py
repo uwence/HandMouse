@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from handmouse.alt_tab_detector import AltTabDetector, AltTabState
 from handmouse.types import FramePoint
+from handmouse.policy.gesture_policy import RiskClass
 
 
 def make_landmarks(index_ext: bool, middle_ext: bool, ring_ext: bool, pinky_ext: bool) -> list[FramePoint]:
@@ -30,37 +31,45 @@ def test_alt_tab_pose_detection() -> None:
 
     # 1. Start with non-alt-tab pose
     bad_landmarks = make_landmarks(index_ext=True, middle_ext=False, ring_ext=False, pinky_ext=False)
-    state, is_alt_held = detector.update(bad_landmarks, now_ms=0)
-    assert state == AltTabState.INACTIVE
-    assert not is_alt_held
+    candidates = detector.update(bad_landmarks, now_ms=0)
+    assert detector.state == AltTabState.INACTIVE
+    assert len(candidates) == 0
 
     # 2. Transition to arming with valid pose
     good_landmarks = make_landmarks(index_ext=True, middle_ext=True, ring_ext=True, pinky_ext=False)
-    state, is_alt_held = detector.update(good_landmarks, now_ms=10)
-    assert state == AltTabState.ARMING
-    assert not is_alt_held
+    candidates = detector.update(good_landmarks, now_ms=10)
+    assert detector.state == AltTabState.ARMING
+    assert len(candidates) == 1
+    assert candidates[0].phase == "candidate"
 
     # 3. Not enough time has passed
-    state, is_alt_held = detector.update(good_landmarks, now_ms=100)
-    assert state == AltTabState.ARMING
-    assert not is_alt_held
+    candidates = detector.update(good_landmarks, now_ms=100)
+    assert detector.state == AltTabState.ARMING
+    assert len(candidates) == 1
+    assert candidates[0].phase == "armed"
 
     # 4. Triggers Alt+Tab after 350ms
-    state, is_alt_held = detector.update(good_landmarks, now_ms=370)
-    assert state == AltTabState.ACTIVE
-    assert is_alt_held
+    candidates = detector.update(good_landmarks, now_ms=370)
+    assert detector.state == AltTabState.ACTIVE
+    assert len(candidates) == 1
+    assert candidates[0].phase == "fire"
+    assert candidates[0].gesture == "task_view"
 
     # 5. Navigates forward on right displacement
     # good_landmarks center is at 0.5. Shift center to 0.6 (rightwards)
     nav_right_landmarks = [FramePoint(pt.x + 0.1, pt.y) for pt in good_landmarks]
-    state, is_alt_held = detector.update(nav_right_landmarks, now_ms=780)
-    assert state == AltTabState.ACTIVE
-    assert is_alt_held
+    candidates = detector.update(nav_right_landmarks, now_ms=780)
+    assert detector.state == AltTabState.ACTIVE
+    assert any(c.phase == "fire" and c.gesture == "nav_right" for c in candidates)
+    
     # Anchor should update, checking small diff now shouldn't navigate immediately again
-    state, is_alt_held = detector.update(nav_right_landmarks, now_ms=790)
-    assert state == AltTabState.ACTIVE
+    candidates = detector.update(nav_right_landmarks, now_ms=790)
+    assert detector.state == AltTabState.ACTIVE
+    assert not any(c.phase == "fire" and c.gesture.startswith("nav") for c in candidates)
 
     # 6. Releases alt when pose is broken
-    state, is_alt_held = detector.update(bad_landmarks, now_ms=800)
-    assert state == AltTabState.INACTIVE
-    assert not is_alt_held
+    candidates = detector.update(bad_landmarks, now_ms=800)
+    assert detector.state == AltTabState.INACTIVE
+    assert len(candidates) == 1
+    assert candidates[0].phase == "fire"
+    assert candidates[0].gesture == "task_view_commit"

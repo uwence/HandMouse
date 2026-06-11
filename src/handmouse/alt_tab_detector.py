@@ -4,13 +4,7 @@ from enum import Enum, auto
 from typing import Any
 
 from handmouse.types import FramePoint
-
-
-try:
-    import pyautogui
-    pyautogui.PAUSE = 0
-except ModuleNotFoundError:
-    pyautogui: Any | None = None
+from handmouse.policy.gesture_policy import GestureCandidate, RiskClass
 
 
 class AltTabState(Enum):
@@ -31,16 +25,24 @@ class AltTabDetector:
         self._anchor_y = 0.0
         self._next_nav_ms = 0
 
-    def update(self, landmarks: list[FramePoint] | None, now_ms: int) -> tuple[AltTabState, bool]:
-        """Updates AltTabState and returns (current_state, is_alt_held)."""
+    def update(self, landmarks: list[FramePoint] | None, now_ms: int) -> list[GestureCandidate]:
         is_pose = self._is_alt_tab_pose(landmarks)
         palm_center = self._palm_center(landmarks) if landmarks else None
+        
+        candidates = []
 
         if self.state == AltTabState.INACTIVE:
             if is_pose:
                 self.state = AltTabState.ARMING
                 self._arming_start_ms = now_ms
-            return self.state, False
+                candidates.append(GestureCandidate(
+                    detector="task_view",
+                    gesture="task_view",
+                    phase="candidate",
+                    confidence=1.0,
+                    risk=RiskClass.HIGH,
+                    exclusive=False
+                ))
 
         elif self.state == AltTabState.ARMING:
             if is_pose:
@@ -49,47 +51,90 @@ class AltTabDetector:
                     self._anchor_x = palm_center.x if palm_center else 0.5
                     self._anchor_y = palm_center.y if palm_center else 0.5
                     self._next_nav_ms = now_ms + self.cooldown_ms
-                    self._press_win_tab()
-                    return self.state, True
-                return self.state, False
+                    
+                    candidates.append(GestureCandidate(
+                        detector="task_view",
+                        gesture="task_view",
+                        phase="fire",
+                        confidence=1.0,
+                        risk=RiskClass.HIGH,
+                        exclusive=True
+                    ))
+                else:
+                    candidates.append(GestureCandidate(
+                        detector="task_view",
+                        gesture="task_view",
+                        phase="armed",
+                        confidence=1.0,
+                        risk=RiskClass.HIGH,
+                        exclusive=False
+                    ))
             else:
                 self.state = AltTabState.INACTIVE
-                return self.state, False
+                candidates.append(GestureCandidate(
+                    detector="task_view",
+                    gesture="task_view",
+                    phase="cancel",
+                    confidence=1.0,
+                    risk=RiskClass.HIGH,
+                    exclusive=False
+                ))
 
         elif self.state == AltTabState.ACTIVE:
             if is_pose:
+                candidates.append(GestureCandidate(
+                    detector="task_view",
+                    gesture="task_view",
+                    phase="hold",
+                    confidence=1.0,
+                    risk=RiskClass.HIGH,
+                    exclusive=True
+                ))
                 if palm_center and now_ms >= self._next_nav_ms:
                     dx = palm_center.x - self._anchor_x
                     dy = palm_center.y - self._anchor_y
                     
                     if abs(dx) > self.nav_threshold or abs(dy) > self.nav_threshold:
+                        nav_action = None
                         if abs(dx) > abs(dy):
                             if dx > self.nav_threshold:
-                                self._press_nav("right")
+                                nav_action = "nav_right"
                                 self._anchor_x = palm_center.x
                             elif dx < -self.nav_threshold:
-                                self._press_nav("left")
+                                nav_action = "nav_left"
                                 self._anchor_x = palm_center.x
                         else:
                             if dy > self.nav_threshold:
-                                self._press_nav("down")
+                                nav_action = "nav_down"
                                 self._anchor_y = palm_center.y
                             elif dy < -self.nav_threshold:
-                                self._press_nav("up")
+                                nav_action = "nav_up"
                                 self._anchor_y = palm_center.y
-                        
-                        self._next_nav_ms = now_ms + self.cooldown_ms
-                return self.state, True
+                                
+                        if nav_action:
+                            candidates.append(GestureCandidate(
+                                detector="task_view",
+                                gesture=nav_action,
+                                phase="fire",
+                                confidence=1.0,
+                                risk=RiskClass.HIGH,
+                                exclusive=True
+                            ))
+                            self._next_nav_ms = now_ms + self.cooldown_ms
             else:
                 self.state = AltTabState.INACTIVE
-                self._submit_selection()
-                return self.state, False
+                candidates.append(GestureCandidate(
+                    detector="task_view",
+                    gesture="task_view_commit",
+                    phase="fire",
+                    confidence=1.0,
+                    risk=RiskClass.HIGH,
+                    exclusive=True
+                ))
 
-        return self.state, False
+        return candidates
 
     def reset(self) -> None:
-        if self.state == AltTabState.ACTIVE:
-            self._submit_selection()
         self.state = AltTabState.INACTIVE
 
     def _is_alt_tab_pose(self, landmarks: list[FramePoint] | None) -> bool:
@@ -117,30 +162,6 @@ class AltTabDetector:
             sum(landmarks[i].x for i in palm_indices) / len(palm_indices),
             sum(landmarks[i].y for i in palm_indices) / len(palm_indices)
         )
-
-    def _press_win_tab(self) -> None:
-        if pyautogui is None:
-            return
-        try:
-            pyautogui.hotkey("win", "tab")
-        except Exception:
-            pass
-
-    def _press_nav(self, key: str) -> None:
-        if pyautogui is None:
-            return
-        try:
-            pyautogui.press(key)
-        except Exception:
-            pass
-
-    def _submit_selection(self) -> None:
-        if pyautogui is None:
-            return
-        try:
-            pyautogui.press("enter")
-        except Exception:
-            pass
 
 
 __all__ = ["AltTabDetector", "AltTabState"]

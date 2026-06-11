@@ -15,9 +15,16 @@ class InteractionInterlock:
             return True
         return False
 
+    def force_acquire(self, interlock_type: InterlockType) -> None:
+        self._state = interlock_type
+
     def release(self, interlock_type: InterlockType) -> None:
         if self._state == interlock_type:
             self._state = InterlockType.NONE
+
+    @property
+    def current_owner(self) -> InterlockType:
+        return self._state
 
     @property
     def is_active(self) -> bool:

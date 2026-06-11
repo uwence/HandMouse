@@ -48,6 +48,7 @@ def unify_hand_result(raw_result: HandTrackingResult, input_is_mirrored: bool) -
         thumb_tip=thumb_tip,
         index_tip=index_tip,
         raw_landmarks=raw_result.raw_landmarks,
+        world_landmarks=getattr(raw_result, "world_landmarks", None),
         handedness_label=unified_label,
         handedness_confidence=raw_result.handedness_confidence,
     )

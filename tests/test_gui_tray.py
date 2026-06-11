@@ -6,7 +6,8 @@ from unittest.mock import MagicMock
 import pytest
 
 import handmouse.tray as tray_module
-import handmouse.gui as gui_module
+import handmouse.ui.advanced_gui as gui_module
+import handmouse.ui.manager as ui_manager
 from handmouse.config import DEFAULT_CONFIG
 
 
@@ -67,8 +68,8 @@ def test_tray_icon_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     toggle_callback = menu_items[0][1]
     toggle_callback(mock_icon_instance, None)
     
-    # "Exit" is fourth item
-    exit_callback = menu_items[3][1]
+    # "Exit" is sixth item
+    exit_callback = menu_items[5][1]
     exit_callback(mock_icon_instance, None)
 
     # Test stop

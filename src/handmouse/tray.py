@@ -6,7 +6,7 @@ from tkinter import messagebox
 from PIL import Image, ImageDraw
 import pystray
 
-from handmouse.gui import open_settings_in_thread
+from handmouse.ui.manager import open_settings_in_thread, open_about_in_thread
 
 _tray_lock = threading.Lock()
 _icon: pystray.Icon | None = None
@@ -39,27 +39,29 @@ def start_tray_icon() -> None:
             from handmouse import app
             app.PENDING_STATE_TOGGLE = True
 
-        def on_settings(icon, item):
-            open_settings_in_thread()
+        def on_settings_basic(icon, item):
+            open_settings_in_thread("basic")
+            
+        def on_settings_advanced(icon, item):
+            open_settings_in_thread("advanced")
 
-        def on_about(icon, item):
-            def _msg():
-                root = tk.Tk()
-                root.withdraw()
-                messagebox.showinfo(
-                    "About HandMouse",
-                    "HandMouse V3\n\n"
-                    "Windows hand gesture controller using webcam & MediaPipe.\n"
-                    "Status: Active (Green) / Idle (Gray)\n\n"
-                    "Developed as a premium desktop utility."
-                )
-                root.destroy()
-            threading.Thread(target=_msg, daemon=True).start()
+        def on_about_action(icon, item):
+            open_about_in_thread()
 
         def on_exit(icon, item):
             from handmouse import app
             app.SHOULD_EXIT = True
             icon.stop()
+
+        def set_profile(profile_name: str):
+            def _inner(icon, item):
+                from handmouse.config.profiles import get_profile
+                from handmouse.config import save_config
+                import handmouse.config as conf
+                new_cfg = get_profile(profile_name)
+                save_config(new_cfg)
+                conf.ACTIVE_CONFIG = new_cfg
+            return _inner
 
         initial_image = _create_circle_icon("#6c7086")
         icon = pystray.Icon(
@@ -68,8 +70,14 @@ def start_tray_icon() -> None:
             title="HandMouse",
             menu=pystray.Menu(
                 pystray.MenuItem("Toggle Active/Idle", on_toggle),
-                pystray.MenuItem("Settings", on_settings),
-                pystray.MenuItem("About", on_about),
+                pystray.MenuItem("Profiles", pystray.Menu(
+                    pystray.MenuItem("Default", set_profile("default")),
+                    pystray.MenuItem("Aggressive", set_profile("aggressive")),
+                    pystray.MenuItem("Conservative", set_profile("conservative")),
+                )),
+                pystray.MenuItem("Settings (Basic)", on_settings_basic),
+                pystray.MenuItem("Settings (Advanced)", on_settings_advanced),
+                pystray.MenuItem("About", on_about_action),
                 pystray.MenuItem("Exit", on_exit),
             )
         )
@@ -94,30 +102,29 @@ def start_tray_icon_blocking() -> None:
             from handmouse import app
             app.PENDING_STATE_TOGGLE = True
 
-        def on_settings(icon, item):
-            open_settings_in_thread()
+        def on_settings_basic(icon, item):
+            open_settings_in_thread("basic")
+            
+        def on_settings_advanced(icon, item):
+            open_settings_in_thread("advanced")
 
-        def on_about(icon, item):
-            def _msg():
-                root = tk.Tk()
-                root.withdraw()
-                messagebox.showinfo(
-                    "About HandMouse",
-                    "HandMouse V3\n\n"
-                    "Windows hand gesture controller using webcam & MediaPipe.\n"
-                    "Status: Active (Green) / Idle (Gray)\n\n"
-                    "Developed as a premium desktop utility."
-                )
-                try:
-                    root.destroy()
-                except Exception:
-                    pass
-            threading.Thread(target=_msg, daemon=True).start()
+        def on_about_action(icon, item):
+            open_about_in_thread()
 
         def on_exit(icon, item):
             from handmouse import app
             app.SHOULD_EXIT = True
             icon.stop()
+
+        def set_profile(profile_name: str):
+            def _inner(icon, item):
+                from handmouse.config.profiles import get_profile
+                from handmouse.config import save_config
+                import handmouse.config as conf
+                new_cfg = get_profile(profile_name)
+                save_config(new_cfg)
+                conf.ACTIVE_CONFIG = new_cfg
+            return _inner
 
         initial_image = _create_circle_icon("#6c7086")
         icon = pystray.Icon(
@@ -126,8 +133,14 @@ def start_tray_icon_blocking() -> None:
             title="HandMouse",
             menu=pystray.Menu(
                 pystray.MenuItem("Toggle Active/Idle", on_toggle),
-                pystray.MenuItem("Settings", on_settings),
-                pystray.MenuItem("About", on_about),
+                pystray.MenuItem("Profiles", pystray.Menu(
+                    pystray.MenuItem("Default", set_profile("default")),
+                    pystray.MenuItem("Aggressive", set_profile("aggressive")),
+                    pystray.MenuItem("Conservative", set_profile("conservative")),
+                )),
+                pystray.MenuItem("Settings (Basic)", on_settings_basic),
+                pystray.MenuItem("Settings (Advanced)", on_settings_advanced),
+                pystray.MenuItem("About", on_about_action),
                 pystray.MenuItem("Exit", on_exit),
             )
         )

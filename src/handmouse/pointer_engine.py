@@ -9,7 +9,6 @@ from typing import Any
 from handmouse.config import ControlRegion
 from handmouse.types import FramePoint, ScreenDelta
 
-
 @dataclass(frozen=True)
 class PointerEngineConfig:
     screen_width: int
@@ -27,13 +26,40 @@ class PointerEngineConfig:
     dead_zone_radius: float = 0.0
     missing_frames_to_idle: int = 4
     pixel_per_palm_width: float | None = None
-
+    velocity_history_size: int = 4
 
 class PointerEngineState(Enum):
     IDLE = auto()
     ACTIVE = auto()
     COOLDOWN = auto()
 
+class VelocityTracker:
+    def __init__(self, history_size: int):
+        self.history_size = history_size
+        self._events: list[tuple[float, float, int]] = []
+
+    def add(self, dx: float, dy: float, ts_ms: int) -> None:
+        self._events.append((dx, dy, ts_ms))
+        if len(self._events) > self.history_size:
+            self._events.pop(0)
+
+    def get_velocity(self) -> float:
+        if len(self._events) < 2:
+            return 0.0
+        
+        total_dx = sum(e[0] for e in self._events)
+        total_dy = sum(e[1] for e in self._events)
+        dt_ms = self._events[-1][2] - self._events[0][2]
+        
+        if dt_ms <= 0:
+            return 0.0
+            
+        dt_s = dt_ms / 1000.0
+        displacement = hypot(total_dx, total_dy)
+        return displacement / dt_s
+
+    def reset(self) -> None:
+        self._events.clear()
 
 class PointerEngine:
     _Wrist = 0
@@ -45,17 +71,13 @@ class PointerEngine:
     def __init__(self, config: PointerEngineConfig) -> None:
         if config.screen_width <= 0 or config.screen_height <= 0:
             raise ValueError("screen dimensions must be positive")
-
         region = config.control_region
         if region.right <= region.left or region.bottom <= region.top:
             raise ValueError("control region must have positive width and height")
-
         if config.missing_frames_to_idle < 1:
             raise ValueError("missing_frames_to_idle must be at least 1")
-
         if config.pixel_per_palm_width is not None and config.pixel_per_palm_width <= 0:
             raise ValueError("pixel_per_palm_width must be positive")
-
         if config.dead_zone_radius < 0:
             raise ValueError("dead_zone_radius must be non-negative")
 
@@ -69,6 +91,10 @@ class PointerEngine:
         self._last_depth_factor: float | None = None
         self._last_hand_scale: float | None = None
         self._scale_reference = config.z_scale_reference
+        
+        self._velocity_tracker = VelocityTracker(config.velocity_history_size)
+        self._rx = 0.0
+        self._ry = 0.0
 
     def update(self, hand_result: Any, now_ms: int) -> ScreenDelta | None:
         landmarks = self._extract_landmarks(hand_result)
@@ -83,11 +109,17 @@ class PointerEngine:
             self._anchor(normalized_point, now_ms, hand_scale)
             return None
 
-        dt_seconds = max((now_ms - self._previous_timestamp_ms) / 1000.0, 1e-6)
         u_x = normalized_point.x - self._previous_point.x
         u_y = normalized_point.y - self._previous_point.y
         displacement = hypot(u_x, u_y)
-        velocity = displacement / dt_seconds
+        
+        self._velocity_tracker.add(u_x, u_y, now_ms)
+        velocity = self._velocity_tracker.get_velocity()
+        
+        # If we don't have enough events for velocity, fallback to instantaneous
+        if velocity == 0.0 and displacement > 0:
+            dt_seconds = max((now_ms - self._previous_timestamp_ms) / 1000.0, 1e-6)
+            velocity = displacement / dt_seconds
 
         depth_factor = self._depth_factor(hand_scale)
         gain = self._gain_for_velocity(velocity, displacement)
@@ -95,13 +127,23 @@ class PointerEngine:
             self.config.pixel_per_palm_width if self.config.pixel_per_palm_width is not None else self.config.screen_height
         )
 
+        raw_dx = pixel_per_palm_width * gain * depth_factor * u_x
+        raw_dy = pixel_per_palm_width * gain * depth_factor * u_y
+
+        # Subpixel accumulation
+        self._rx += raw_dx
+        self._ry += raw_dy
+        
+        dx_int = round(self._rx)
+        dy_int = round(self._ry)
+
+        self._rx -= dx_int
+        self._ry -= dy_int
+
         if gain == 0.0:
             delta = ScreenDelta(0, 0)
         else:
-            delta = ScreenDelta(
-                round(pixel_per_palm_width * gain * depth_factor * u_x),
-                round(pixel_per_palm_width * gain * depth_factor * u_y),
-            )
+            delta = ScreenDelta(dx_int, dy_int)
 
         self._previous_point = normalized_point
         self._previous_timestamp_ms = now_ms
@@ -123,6 +165,9 @@ class PointerEngine:
         self._last_gain = None
         self._last_depth_factor = None
         self._last_hand_scale = None
+        self._velocity_tracker.reset()
+        self._rx = 0.0
+        self._ry = 0.0
         if self.config.z_scale_reference is None:
             self._scale_reference = None
 
@@ -153,6 +198,9 @@ class PointerEngine:
         self._last_gain = None
         self._last_depth_factor = None
         self._last_hand_scale = None
+        self._velocity_tracker.reset()
+        self._rx = 0.0
+        self._ry = 0.0
         self._missing_frames += 1
         if self._missing_frames >= self.config.missing_frames_to_idle:
             self._state = PointerEngineState.IDLE
@@ -169,6 +217,10 @@ class PointerEngine:
         self._last_gain = None
         self._last_depth_factor = 1.0
         self._last_hand_scale = hand_scale
+        self._velocity_tracker.reset()
+        self._velocity_tracker.add(0.0, 0.0, now_ms)
+        self._rx = 0.0
+        self._ry = 0.0
         if self._scale_reference is None:
             self._scale_reference = hand_scale
 
@@ -181,7 +233,6 @@ class PointerEngine:
     def _depth_factor(self, hand_scale: float) -> float:
         if self._scale_reference is None:
             self._scale_reference = hand_scale
-
         raw = (self._scale_reference / hand_scale) ** self.config.depth_gamma
         return self._clamp(raw, self.config.z_min, self.config.z_max)
 
@@ -210,11 +261,9 @@ class PointerEngine:
     def _extract_landmarks(self, hand_result: Any) -> list[FramePoint] | None:
         if hand_result is None:
             return None
-
         landmarks = getattr(hand_result, "landmarks", None)
         if not landmarks:
             return None
-
         return landmarks
 
     def _extract_index_tip(
@@ -226,10 +275,8 @@ class PointerEngine:
             index_tip = getattr(hand_result, "index_tip", None)
             if index_tip is not None:
                 return index_tip
-
         if landmarks is None or len(landmarks) <= self._IndexTip:
             return None
-
         return landmarks[self._IndexTip]
 
     def _estimate_hand_scale(self, landmarks: list[FramePoint]) -> float | None:
@@ -256,7 +303,6 @@ class PointerEngine:
     @staticmethod
     def _clamp(value: float, lower: float, upper: float) -> float:
         return max(lower, min(upper, value))
-
 
 __all__ = [
     "PointerEngine",

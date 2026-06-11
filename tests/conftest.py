@@ -12,7 +12,13 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _reset_gui_window() -> None:
-    from handmouse import gui as gui_module
-    gui_module._gui_window = None
+    import handmouse.ui.advanced_gui as advanced_gui
+    import handmouse.ui.basic_gui as basic_gui
+    import handmouse.ui.manager as manager
+    advanced_gui._gui_window = None
+    basic_gui._gui_window = None
+    manager._gui_window = None
     yield
-    gui_module._gui_window = None
+    advanced_gui._gui_window = None
+    basic_gui._gui_window = None
+    manager._gui_window = None

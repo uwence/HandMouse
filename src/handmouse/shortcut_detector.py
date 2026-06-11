@@ -5,6 +5,8 @@ from enum import Enum, auto
 
 from handmouse.config import ShortcutConfig
 from handmouse.types import FramePoint
+from handmouse.tracking.observation import HandObservation
+from handmouse.policy.gesture_policy import GestureCandidate, RiskClass
 
 
 class ShortcutAction(Enum):
@@ -23,14 +25,6 @@ class ShortcutState(Enum):
     COOLDOWN = auto()
 
 
-@dataclass(frozen=True)
-class ShortcutResult:
-    state: ShortcutState
-    action: ShortcutAction | None
-    displacement_x: float | None
-    displacement_y: float | None
-
-
 class ShortcutDetector:
     def __init__(self, config: ShortcutConfig) -> None:
         self.config = config
@@ -39,21 +33,20 @@ class ShortcutDetector:
         self._cooldown_until_ms = 0
         self._palm_was_open = False
 
-    def update(self, point: FramePoint | None, now_ms: int, palm_open: bool = False) -> ShortcutResult:
-        if point is None:
+    def update(self, obs: HandObservation | None, now_ms: int, point: FramePoint | None, palm_open: bool = False) -> list[GestureCandidate]:
+        if obs is None or point is None:
             self.reset()
-            return ShortcutResult(ShortcutState.NO_HAND, None, None, None)
+            return []
 
         if now_ms < self._cooldown_until_ms:
-            return ShortcutResult(ShortcutState.COOLDOWN, None, None, None)
+            return []
 
         if self._anchor is None or self._anchor_ms is None:
             self._anchor = point
             self._anchor_ms = now_ms
             self._palm_was_open = palm_open
-            return ShortcutResult(ShortcutState.TRACKING, None, 0.0, 0.0)
+            return []
 
-        # Record if palm is open at any point during tracking
         self._palm_was_open = self._palm_was_open or palm_open
 
         elapsed_ms = now_ms - self._anchor_ms
@@ -61,13 +54,14 @@ class ShortcutDetector:
             self._anchor = point
             self._anchor_ms = now_ms
             self._palm_was_open = palm_open
-            return ShortcutResult(ShortcutState.TRACKING, None, 0.0, 0.0)
+            return []
 
         dx = point.x - self._anchor.x
         dy = point.y - self._anchor.y
         action = self._classify(dx, dy, self._palm_was_open)
+        
         if action is None:
-            return ShortcutResult(ShortcutState.TRACKING, None, dx, dy)
+            return []
 
         if self._palm_was_open:
             if action == ShortcutAction.SWIPE_LEFT:
@@ -79,7 +73,27 @@ class ShortcutDetector:
         self._anchor_ms = None
         self._palm_was_open = False
         self._cooldown_until_ms = now_ms + self.config.cooldown_ms
-        return ShortcutResult(ShortcutState.DETECTED, action, dx, dy)
+
+        gesture_map = {
+            ShortcutAction.SWIPE_LEFT: "swipe_left",
+            ShortcutAction.SWIPE_RIGHT: "swipe_right",
+            ShortcutAction.SWIPE_UP: "swipe_up",
+            ShortcutAction.SWIPE_DOWN: "swipe_down",
+            ShortcutAction.SWIPE_LEFT_PALM: "swipe_left_palm",
+            ShortcutAction.SWIPE_RIGHT_PALM: "swipe_right_palm",
+        }
+        
+        risk = RiskClass.HIGH if action in (ShortcutAction.SWIPE_LEFT_PALM, ShortcutAction.SWIPE_RIGHT_PALM) else RiskClass.MEDIUM
+
+        return [GestureCandidate(
+            detector="shortcut",
+            gesture=gesture_map[action],
+            phase="fire",
+            confidence=1.0,
+            risk=risk,
+            exclusive=True,
+            measurements={"dx": dx, "dy": dy}
+        )]
 
     def reset(self) -> None:
         self._anchor = None
@@ -91,9 +105,7 @@ class ShortcutDetector:
         abs_y = abs(dy)
         base_threshold = self.config.min_distance
         
-        # Require 50% more distance for V-Sign (Win+D) swipes to prevent accidental triggers
         h_threshold = base_threshold * 1.5 if palm_was_open else base_threshold
-        
         ratio = self.config.axis_ratio
 
         if abs_x >= h_threshold and abs_x >= abs_y * ratio:
@@ -108,6 +120,5 @@ class ShortcutDetector:
 __all__ = [
     "ShortcutAction",
     "ShortcutDetector",
-    "ShortcutResult",
     "ShortcutState",
 ]

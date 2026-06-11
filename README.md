@@ -31,6 +31,14 @@ Or, if you already have the deps installed in a global venv (e.g. Hermes venv at
 python -m handmouse.app
 ```
 
+When you run the app, you will now see a **System Tray Icon**. 
+- **Left/Right Click** the tray icon to access:
+  - **Settings (Basic & Advanced)**: Configure camera, pointer speed, and gestures.
+  - **Profiles**: Switch between `Default`, `Aggressive`, and `Conservative` profiles on the fly.
+  - **Toggle Active/Idle**: Manually engage/disengage mouse control.
+
+All settings are automatically saved to `~/.handmouse/config.yaml`. Telemetry is also recorded in the background to `~/.handmouse/telemetry/` as NDJSON for later analysis.
+
 First run downloads the MediaPipe hand landmarker model (~7.5 MB) to `%USERPROFILE%\.handmouse\models\hand_landmarker.task`. To pre-place it:
 
 ```powershell
@@ -84,43 +92,33 @@ What you should feel:
 - Sub-`v_jitter` (0.20 palm-width/s) movement is suppressed — this is your rest tolerance for hand tremor
 - Releasing `Right Ctrl` → movement stops immediately
 
-### 2. Left click (release-to-commit pinch)
+### 2. Left click / Drag (Pinch based on palm-span ratio)
 
-- **Trigger**: thumb tip + index tip come within normalized distance 0.05 of each other (palm-width normalized), confirmed for 2 frames → `PINCH_PRESSED`
-- **Hold**: stay pinched → state goes to `PINCH_HOLD` (no click yet, no repeat)
-- **Release**: distance exceeds 0.075, confirmed for 2 frames → **emit one left click**, enter COOLDOWN 150ms
+- **Trigger**: thumb tip + index tip come within a normalized ratio of the palm span (default 0.5), confirmed for 2 frames → `PINCH_PRESSED`
+- **Hold**: stay pinched → state goes to `PINCH_HOLD` (emits a drag hold intent, which will hold the left mouse button if moved)
+- **Release**: distance exceeds 0.7 ratio to palm span, confirmed for 2 frames → **emit one click or release drag**, enter COOLDOWN 150ms
 
 What you should feel:
 
-- Pinch and hold → no click happens, but the bottom bar will fill green (press zone)
-- Release → one click
-- Try to click again immediately → COOLDOWN 150ms blocks the next click
-- Pinching through the click is wrong — let go to fire
-
-This is the single biggest change from v1. Press-to-click is gone; release-to-commit is what every VR / AR product uses for a reason.
+- The pinch is now **depth-invariant** and size-invariant because it's calculated relative to your palm size, not absolute screen space.
+- Pinch and hold without moving → no click happens until release.
+- Pinch, hold, and move your hand → initiates a drag & drop action.
+- Release → one click (or ends drag).
+- Try to click again immediately → COOLDOWN 150ms blocks the next click.
 
 ### 3. Grab scroll (active in ACTIVE)
 
-- **Grab pose**: thumb-index distance < 1.8 × palm-width AND at least 2 of {index, middle, ring, pinky} are curled (tip-to-palm-center distance < 1.65 × mcp-to-palm-center distance)
-- **Hold** the grab pose for 120ms → state goes to `GRABBING`
-- **Move** your hand up or down (any frame where hand-center y-delta > 0.015 normalized) → state goes to `DRAGGING`, scroll delta = `−y_delta × 180` (clamped to ±18 per frame)
-- **Release** the grab pose or move out of frame → state `RELEASED`, scroll stops, 120ms grace before reset
-
-What you should feel:
-
-- Static grab pose held still → no scroll, `Grab: state=GRABBING active=no`
-- Grab and pull your hand down → page scrolls up (natural touchpad-like direction)
-- Grab and push up → page scrolls down
-- Let go → scroll stops cleanly
+- **Grab pose**: thumb-index distance < 1.8 × palm-width AND at least 2 of {index, middle, ring, pinky} are curled.
+- **Hold** the grab pose for 120ms → state goes to `GRABBING`.
+- **Move** your hand up or down → state goes to `DRAGGING`. We added a **dead zone** to prevent accidental micro-scrolls.
+- **Release** the grab pose or move out of frame → state `RELEASED`, scroll stops. There is a 120ms post-release grace period to prevent jittery exits.
 
 ### 4. Swipe shortcut (active in ACTIVE, AND not currently in a grab pose)
 
-- **Trigger**: index tip moves >= 0.18 normalized distance in one direction within 900ms
-- **Axis ratio**: must be 1.4× more pronounced on one axis than the other (so a diagonal does not fire)
-- **Action**: `SWIPE_LEFT` / `SWIPE_RIGHT` press the left / right arrow key 4 times; `SWIPE_UP` / `SWIPE_DOWN` scroll ±20
-- **Cooldown** 700ms between swipes
-
-This is the existing v1 behavior preserved for users who rely on it.
+- **Anchor point**: Palm center (changed from index tip, making it much more robust against finger wiggles).
+- **Trigger**: Palm center moves >= 0.18 normalized distance in one direction within 900ms.
+- **Action**: `SWIPE_LEFT` / `SWIPE_RIGHT` switches virtual desktops or invokes `Win+D` (depending on configuration); `SWIPE_UP` / `SWIPE_DOWN` scrolls aggressively.
+- **Risk Level**: Swipes are considered HIGH_RISK actions and are strictly gated by the TrackingQualityGate to prevent false positives when tracking is unstable.
 
 ## Debug overlay
 
@@ -162,7 +160,10 @@ A 280-pixel horizontal bar with two marker lines:
 
 ## Tuning
 
-All thresholds are dataclass fields. Edit `src/handmouse/config.py` (for camera / pointer region) or pass to constructors in `src/handmouse/app.py`:
+All configurations are now automatically managed via a robust YAML engine and saved to `~/.handmouse/config.yaml`.
+You can adjust the parameters visually via the System Tray **Settings** menu, or switch entire presets via the **Profiles** menu.
+
+If you prefer to edit the configuration manually, you can open `~/.handmouse/config.yaml`. Any missing fields will be safely populated with defaults.
 
 | Knob | Where | What it does | Default |
 |---|---|---|---|
@@ -179,8 +180,8 @@ All thresholds are dataclass fields. Edit `src/handmouse/config.py` (for camera 
 | `PointerEngineConfig.z_min / z_max` | `app.py` | Depth compensation clamps | 0.70 / 1.25 |
 | `EngagementConfig.palm_hold_ms` | `app.py` | How long to hold open palm to engage | 200 ms |
 | `EngagementConfig.missing_frames_to_idle` | `app.py` | How many missing-hand frames to disengage | 4 |
-| `GestureConfig.pinch_close` | `app.py` | Press trigger threshold | 0.05 |
-| `GestureConfig.pinch_open` | `app.py` | Release trigger threshold | 0.075 |
+| `GestureConfig.pinch_close_ratio` | `app.py` | Press trigger ratio (distance / palm_span) | 0.5 |
+| `GestureConfig.pinch_open_ratio` | `app.py` | Release trigger ratio (distance / palm_span) | 0.7 |
 | `GestureConfig.confirm_frames` | `app.py` | Frames to confirm pinch press | 2 |
 | `GestureConfig.release_confirm_frames` | `app.py` | Frames to confirm pinch release | 2 |
 | `GestureConfig.cooldown_ms` | `app.py` | Time after click before another is allowed | 150 ms |

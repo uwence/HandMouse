@@ -56,6 +56,7 @@ def make_hand_result(
         thumb_tip=FramePoint(index_tip.x, index_tip.y),
         index_tip=index_tip,
         raw_landmarks=None,
+        world_landmarks=None,
         handedness_label=None,
         handedness_confidence=None,
     )
@@ -71,6 +72,7 @@ def test_no_hand_returns_none() -> None:
             thumb_tip=None,
             index_tip=None,
             raw_landmarks=None,
+            world_landmarks=None,
             handedness_label=None,
             handedness_confidence=None,
         ),

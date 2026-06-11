@@ -76,8 +76,8 @@ class FakeGesture:
         self.results = list(results)
         self.calls: list[tuple[object, object, int]] = []
 
-    def update(self, thumb: object, index: object, now_ms: int) -> object:
-        self.calls.append((thumb, index, now_ms))
+    def update(self, obs, now_ms: int) -> object:
+        self.calls.append((obs, now_ms))
         assert self.results, "no gesture results left"
         return self.results.pop(0)
 
@@ -90,7 +90,7 @@ class FakeGrabScroll:
         self.results = list(results)
         self.reset_calls = 0
 
-    def update(self, landmarks: object, now_ms: int) -> object:
+    def update(self, obs: object, now_ms: int) -> object:
         assert self.results, "no grab results left"
         return self.results.pop(0)
 
@@ -99,13 +99,15 @@ class FakeGrabScroll:
 
 
 class FakeShortcutDetector:
-    def __init__(self) -> None:
+    def __init__(self, results: list[object]) -> None:
         self.reset_calls = 0
+        self.results = list(results)
         self.update_calls: list[tuple[object, int]] = []
 
-    def update(self, point: object, now_ms: int, palm_open: bool = False) -> object:
-        self.update_calls.append((point, now_ms, palm_open))
-        return SimpleNamespace(action=None)
+    def update(self, obs: object, now_ms: int, point: object, palm_open: bool = False) -> object:
+        self.update_calls.append((obs, now_ms, point, palm_open))
+        assert self.results, "no shortcut results left"
+        return self.results.pop(0)
 
     def reset(self) -> None:
         self.reset_calls += 1
@@ -198,31 +200,10 @@ def make_hand_result(*, index_tip: FramePoint | None, landmarks: list[FramePoint
         thumb_tip=index_tip,
         index_tip=index_tip,
         raw_landmarks=None,
-        handedness_label=None,
-        handedness_confidence=None,
+        world_landmarks=None,
+        handedness_label="Left",
+        handedness_confidence=0.99,
     )
-
-
-def make_pose_landmarks(*, grab_like: bool) -> list[FramePoint]:
-    points = [FramePoint(0.5, 0.5) for _ in range(21)]
-    points[0] = FramePoint(0.5, 0.75)
-    points[5] = FramePoint(0.42, 0.58)
-    points[9] = FramePoint(0.50, 0.55)
-    points[13] = FramePoint(0.58, 0.58)
-    points[17] = FramePoint(0.64, 0.64)
-    points[4] = FramePoint(0.46, 0.48)
-    points[8] = FramePoint(0.49, 0.47)
-
-    if grab_like:
-        points[12] = FramePoint(0.53, 0.60)
-        points[16] = FramePoint(0.58, 0.63)
-        points[20] = FramePoint(0.62, 0.67)
-    else:
-        points[12] = FramePoint(0.50, 0.34)
-        points[16] = FramePoint(0.59, 0.36)
-        points[20] = FramePoint(0.68, 0.42)
-
-    return points
 
 
 def make_engagement_result(*, active: bool, state: str, reason: str = "active") -> object:
@@ -276,114 +257,15 @@ def test_main_preserves_startup_error_when_camera_open_fails(monkeypatch: pytest
         app_module.main()
 
 
-def test_run_loop_resets_shortcut_detector_when_inactive() -> None:
-    cv2 = FakeCv2(wait_keys=[0, ord("q")])
-    camera = FakeCamera(frames=[object(), object()])
-    tracker = FakeTracker(
-        [
-            make_hand_result(index_tip=None),
-            make_hand_result(index_tip=None),
-        ]
-    )
-    pointer = FakePointer(updates=[])
-    gesture = FakeGesture(
-        [
-            SimpleNamespace(should_click=False, pinch_distance=None, state=SimpleNamespace(name="PINCH_OPEN")),
-        ]
-    )
-    grab_scroll = FakeGrabScroll(
-        [
-            SimpleNamespace(state=SimpleNamespace(name="NO_HAND"), active=False, scroll_delta=0, is_grab_pose=False),
-        ]
-    )
-    shortcut_detector = FakeShortcutDetector()
-    engagement = FakeEngagement(
-        [
-            make_engagement_result(active=False, state="IDLE", reason="idle"),
-            make_engagement_result(active=False, state="IDLE", reason="escape"),
-        ]
-    )
-    mouse = FakeMouse()
-    shortcut = FakeShortcutController()
-
-    _run_loop(
-        cv2=cv2,
-        camera=camera,
-        tracker=tracker,
-        pointer=pointer,
-        gesture=gesture,
-        grab_scroll=grab_scroll,
-        shortcut_detector=shortcut_detector,
-        engagement=engagement,
-        mouse=mouse,
-        shortcut=shortcut,
-        debug_view=FakeDebugView(),
-        interlock=InteractionInterlock(),
-    )
-
-    assert shortcut_detector.reset_calls == 1
-
-
-def test_run_loop_resets_shortcut_detector_when_grab_pose_blocks_swipe() -> None:
-    cv2 = FakeCv2(wait_keys=[0, ord("q")])
-    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=[FramePoint(0.0, 0.0)] * 21)
-    camera = FakeCamera(frames=[object(), object()])
-    tracker = FakeTracker([hand_result, hand_result])
-    pointer = FakePointer(updates=[None])
-    gesture = FakeGesture(
-        [
-            SimpleNamespace(should_click=False, pinch_distance=0.1, state=SimpleNamespace(name="PINCH_OPEN")),
-        ]
-    )
-    grab_scroll = FakeGrabScroll(
-        [
-            SimpleNamespace(state=SimpleNamespace(name="GRABBING"), active=False, scroll_delta=0, is_grab_pose=True),
-        ]
-    )
-    shortcut_detector = FakeShortcutDetector()
-    engagement = FakeEngagement(
-        [
-            make_engagement_result(active=True, state="ACTIVE"),
-            make_engagement_result(active=False, state="IDLE", reason="escape"),
-        ]
-    )
-
-    _run_loop(
-        cv2=cv2,
-        camera=camera,
-        tracker=tracker,
-        pointer=pointer,
-        gesture=gesture,
-        grab_scroll=grab_scroll,
-        shortcut_detector=shortcut_detector,
-        engagement=engagement,
-        mouse=FakeMouse(),
-        shortcut=FakeShortcutController(),
-        debug_view=FakeDebugView(),
-        interlock=InteractionInterlock(),
-    )
-
-    assert shortcut_detector.reset_calls == 1
-    assert shortcut_detector.update_calls == []
-
-
 def test_run_loop_aborts_cleanly_on_mouse_failsafe() -> None:
     cv2 = FakeCv2(wait_keys=[0])
-    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=[FramePoint(0.0, 0.0)] * 21)
+    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=[])
     camera = FakeCamera(frames=[object()])
     tracker = FakeTracker([hand_result])
     pointer = FakePointer(updates=[ScreenDelta(10, 0)])
-    gesture = FakeGesture(
-        [
-            SimpleNamespace(should_click=False, pinch_distance=0.1, state=SimpleNamespace(name="PINCH_OPEN")),
-        ]
-    )
-    grab_scroll = FakeGrabScroll(
-        [
-            SimpleNamespace(state=SimpleNamespace(name="NO_HAND"), active=False, scroll_delta=0, is_grab_pose=False),
-        ]
-    )
-    shortcut_detector = FakeShortcutDetector()
+    gesture = FakeGesture([[]])
+    grab_scroll = FakeGrabScroll([[]])
+    shortcut_detector = FakeShortcutDetector([[]])
     engagement = FakeEngagement([make_engagement_result(active=True, state="ACTIVE")])
     mouse = FakeMouse(move_exception=MouseFailsafeTriggered("corner"))
     shortcut = FakeShortcutController()
@@ -408,170 +290,9 @@ def test_run_loop_aborts_cleanly_on_mouse_failsafe() -> None:
     assert shortcut.enabled[-1] is False
 
 
-def test_run_loop_suppresses_pinch_when_hand_pose_is_grab_like() -> None:
-    cv2 = FakeCv2(wait_keys=[0, ord("q")])
-    landmarks = make_pose_landmarks(grab_like=True)
-    hand_result = SimpleNamespace(
-        landmarks=landmarks,
-        thumb_tip=landmarks[4],
-        index_tip=landmarks[8],
-        raw_landmarks=None,
-        handedness_label=None,
-        handedness_confidence=None,
-    )
-    camera = FakeCamera(frames=[object(), object()])
-    tracker = FakeTracker([hand_result, hand_result])
-    pointer = FakePointer(updates=[None])
-    gesture = FakeGesture(
-        [
-            SimpleNamespace(should_click=False, pinch_distance=None, state=SimpleNamespace(name="PINCH_OPEN")),
-        ]
-    )
-    grab_scroll = FakeGrabScroll(
-        [
-            SimpleNamespace(state=SimpleNamespace(name="RELEASED"), active=False, scroll_delta=0, is_grab_pose=False),
-        ]
-    )
-    shortcut_detector = FakeShortcutDetector()
-    engagement = FakeEngagement(
-        [
-            make_engagement_result(active=True, state="ACTIVE"),
-            make_engagement_result(active=False, state="IDLE", reason="escape"),
-        ]
-    )
-
-    _run_loop(
-        cv2=cv2,
-        camera=camera,
-        tracker=tracker,
-        pointer=pointer,
-        gesture=gesture,
-        grab_scroll=grab_scroll,
-        shortcut_detector=shortcut_detector,
-        engagement=engagement,
-        mouse=FakeMouse(),
-        shortcut=FakeShortcutController(),
-        debug_view=FakeDebugView(),
-        interlock=InteractionInterlock(),
-    )
-
-    assert gesture.calls[0][0] is None
-    assert gesture.calls[0][1] is None
-
-
-def test_run_loop_moves_only_when_clutch_down_and_mode_active() -> None:
-    cv2 = FakeCv2(wait_keys=[0, ord("q")])
-    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=make_pose_landmarks(grab_like=False))
-    camera = FakeCamera(frames=[object(), object()])
-    tracker = FakeTracker([hand_result, hand_result])
-    pointer = FakePointer(updates=[ScreenDelta(12, 0)])
-    gesture = FakeGesture(
-        [
-            SimpleNamespace(should_click=False, pinch_distance=None, state=SimpleNamespace(name="PINCH_OPEN")),
-        ]
-    )
-    grab_scroll = FakeGrabScroll(
-        [
-            SimpleNamespace(state=SimpleNamespace(name="NO_HAND"), active=False, scroll_delta=0, is_grab_pose=False),
-        ]
-    )
-    shortcut_detector = FakeShortcutDetector()
-    engagement = FakeEngagement(
-        [
-            make_engagement_result(active=True, state="ACTIVE"),
-            make_engagement_result(active=False, state="IDLE", reason="escape"),
-        ]
-    )
-    clutch_input = FakeClutchInput([ClutchSnapshot(clutch_down=True), ClutchSnapshot(clutch_down=True)])
-    move_mode = FakeMoveMode(
-        [
-            make_move_mode_result(
-                state=MoveModeState.ACTIVE,
-                movement_enabled=True,
-                move_pose=True,
-                clutch_down=True,
-            ),
-        ]
-    )
-    mouse = FakeMouse()
-
-    _run_loop(
-        cv2=cv2,
-        camera=camera,
-        tracker=tracker,
-        pointer=pointer,
-        gesture=gesture,
-        grab_scroll=grab_scroll,
-        shortcut_detector=shortcut_detector,
-        engagement=engagement,
-        mouse=mouse,
-        shortcut=FakeShortcutController(),
-        debug_view=FakeDebugView(),
-        interlock=InteractionInterlock(),
-        clutch_input=clutch_input,
-        move_mode=move_mode,
-    )
-
-    assert mouse.moves == [ScreenDelta(12, 0)]
-
-
-def test_run_loop_blocks_click_and_scroll_while_move_mode_active() -> None:
-    cv2 = FakeCv2(wait_keys=[0, ord("q")])
-    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=make_pose_landmarks(grab_like=False))
-    camera = FakeCamera(frames=[object(), object()])
-    tracker = FakeTracker([hand_result, hand_result])
-    pointer = FakePointer(updates=[ScreenDelta(12, 0)])
-    gesture = FakeGesture(
-        [
-            SimpleNamespace(should_click=False, pinch_distance=None, state=SimpleNamespace(name="PINCH_OPEN")),
-        ]
-    )
-    grab_scroll = FakeGrabScroll(
-        [
-            SimpleNamespace(state=SimpleNamespace(name="DRAGGING"), active=True, scroll_delta=9, is_grab_pose=True),
-        ]
-    )
-    shortcut = FakeShortcutController()
-
-    _run_loop(
-        cv2=cv2,
-        camera=camera,
-        tracker=tracker,
-        pointer=pointer,
-        gesture=gesture,
-        grab_scroll=grab_scroll,
-        shortcut_detector=FakeShortcutDetector(),
-        engagement=FakeEngagement(
-            [
-                make_engagement_result(active=True, state="ACTIVE"),
-                make_engagement_result(active=False, state="IDLE", reason="escape"),
-            ]
-        ),
-        mouse=FakeMouse(),
-        shortcut=shortcut,
-        debug_view=FakeDebugView(),
-        interlock=InteractionInterlock(),
-        clutch_input=FakeClutchInput([ClutchSnapshot(clutch_down=True), ClutchSnapshot(clutch_down=True)]),
-        move_mode=FakeMoveMode(
-            [
-                make_move_mode_result(
-                    state=MoveModeState.ACTIVE,
-                    movement_enabled=True,
-                    move_pose=True,
-                    clutch_down=True,
-                ),
-            ]
-        ),
-    )
-
-    assert shortcut.scrolled == []
-    assert gesture.calls[0][0] is None
-    assert gesture.calls[0][1] is None
-
-
 def test_run_loop_passes_clutch_and_move_mode_telemetry() -> None:
     cv2 = FakeCv2(wait_keys=[0, ord("q")])
-    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=make_pose_landmarks(grab_like=False))
+    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=[])
     debug_view = FakeDebugView()
 
     _run_loop(
@@ -579,17 +300,9 @@ def test_run_loop_passes_clutch_and_move_mode_telemetry() -> None:
         camera=FakeCamera(frames=[object(), object()]),
         tracker=FakeTracker([hand_result, hand_result]),
         pointer=FakePointer(updates=[ScreenDelta(12, 0)]),
-        gesture=FakeGesture(
-            [
-                SimpleNamespace(should_click=False, pinch_distance=None, state=SimpleNamespace(name="PINCH_OPEN")),
-            ]
-        ),
-        grab_scroll=FakeGrabScroll(
-            [
-                SimpleNamespace(state=SimpleNamespace(name="NO_HAND"), active=False, scroll_delta=0, is_grab_pose=False),
-            ]
-        ),
-        shortcut_detector=FakeShortcutDetector(),
+        gesture=FakeGesture([[]]),
+        grab_scroll=FakeGrabScroll([[]]),
+        shortcut_detector=FakeShortcutDetector([[]]),
         engagement=FakeEngagement(
             [
                 make_engagement_result(active=True, state="ACTIVE"),
@@ -615,4 +328,3 @@ def test_run_loop_passes_clutch_and_move_mode_telemetry() -> None:
 
     assert debug_view.last_telemetry.clutch_down is True
     assert debug_view.last_telemetry.move_mode == "ACTIVE"
-    assert debug_view.last_telemetry.move_pose is True

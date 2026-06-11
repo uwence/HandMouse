@@ -15,7 +15,7 @@ from handmouse.gesture_detector import GestureConfig, GestureDetector, GestureSt
 from handmouse.grab_scroll_detector import (
     GrabScrollConfig,
     GrabScrollDetector,
-    GrabScrollResult,
+    
     GrabScrollState,
 )
 from handmouse.interlock import InteractionInterlock
@@ -33,6 +33,12 @@ from handmouse.shortcut_detector import ShortcutDetector, ShortcutAction
 from handmouse.thread_pipeline import CameraReader, InferenceWorker
 from handmouse.alt_tab_detector import AltTabDetector, AltTabState
 import handmouse.coordinate_mapper as coordinate_mapper
+from handmouse.tracking.observation import HandObservation, Point3, TrackingQuality
+from handmouse.tracking.quality_gate import TrackingQualityGate
+from handmouse.policy.gesture_policy import GesturePolicy, GestureCandidate, RiskClass
+from handmouse.actions.windows_backend import ActionRouter
+from handmouse.shortcut_detector import ShortcutAction
+
 
 
 WINDOW_NAME = "HandMouse"
@@ -74,8 +80,8 @@ def main() -> None:
         interlock = InteractionInterlock()
         gesture = GestureDetector(
             GestureConfig(
-                pinch_close=config.gesture_config.pinch_close,
-                pinch_open=config.gesture_config.pinch_open,
+                pinch_close_ratio=config.gesture_config.pinch_close_ratio,
+                pinch_open_ratio=config.gesture_config.pinch_open_ratio,
             ),
             interlock=interlock
         )
@@ -90,6 +96,9 @@ def main() -> None:
         engagement = EngagementFSM(EngagementConfig())
         move_mode = MoveModeController(MoveModeConfig())
         debug_view = DebugView(config)
+        quality_gate = TrackingQualityGate()
+        policy = GesturePolicy()
+        action_router = ActionRouter(mouse, shortcut)
         
         from handmouse.osd import OSDManager
         osd = OSDManager(enabled=config.show_osd)
@@ -133,6 +142,9 @@ def main() -> None:
                     inference_worker=inference_worker,
                     alt_tab_detector=alt_tab_detector,
                     osd=osd,
+                    quality_gate=quality_gate,
+                    policy=policy,
+                    action_router=action_router,
                 )
             except Exception as e:
                 print(f"Error in HandMouse loop: {e}")
@@ -208,6 +220,9 @@ def _run_loop(
     inference_worker: InferenceWorker | None = None,
     alt_tab_detector: AltTabDetector | None = None,
     osd: Any | None = None,
+    quality_gate: TrackingQualityGate | None = None,
+    policy: GesturePolicy | None = None,
+    action_router: ActionRouter | None = None,
 ) -> None:
     previous_frame_time = time.perf_counter()
     previous_frame_capture_time = previous_frame_time
@@ -224,6 +239,7 @@ def _run_loop(
 
     last_applied_config = None
     last_active_state = None
+    last_task_view_ms = 0
 
     import handmouse.config as conf
 
@@ -375,154 +391,77 @@ def _run_loop(
         move_active = is_active and move_mode_result.movement_enabled
         shortcut_should_reset = False
         dx, dy = 0.0, 0.0
+        if quality_gate is None:
+            quality_gate = TrackingQualityGate()
+        if policy is None:
+            policy = GesturePolicy()
+        if action_router is None:
+            action_router = ActionRouter(mouse, shortcut)
+
+        obs = None
+        if hand_result and hand_result.landmarks:
+            pts = [Point3(x=lm.x, y=lm.y, z=0.0) for lm in hand_result.landmarks]
+            obs = HandObservation(
+                frame_id=0,
+                ts_ms=now_ms,
+                image_landmarks=pts,
+                world_landmarks=None,
+                handedness_label=getattr(hand_result, "handedness_label", None),
+                handedness_score=getattr(hand_result, "handedness_confidence", None),
+                raw_result=hand_result,
+                stale_ms=frame_age_ms,
+                camera_space="mirrored"
+            )
+
+        scr_w = pointer.config.screen_width if hasattr(pointer, "config") else 1920
+        scr_h = pointer.config.screen_height if hasattr(pointer, "config") else 1080
+        quality = quality_gate.update(obs, scr_w, scr_h)
+
+        candidates = []
+
+        is_dragging = False
+        if getattr(gesture, "_left_state", GestureState.PINCH_OPEN) == GestureState.PINCH_HOLD or \
+           getattr(gesture, "_right_state", GestureState.PINCH_OPEN) == GestureState.PINCH_HOLD:
+            is_dragging = True
+            
+        effective_move_active = (is_active and move_mode_result.movement_enabled) or is_dragging
 
         try:
-            if move_active:
-                if alt_tab_detector is not None:
-                    alt_tab_detector.reset()
-                if drag_active:
-                    mouse.left_up()
-                    drag_active = False
+            if effective_move_active:
                 delta = pointer.update(hand_result, now_ms)
                 if delta is not None and (delta.dx != 0 or delta.dy != 0):
                     mouse.move_relative(delta)
                     dx = delta.dx
                     dy = delta.dy
-                gesture_result = gesture.update(None, None, now_ms)
-                grab_scroll.reset()
-                grab_result = _neutral_grab_result()
-                shortcut_should_reset = True
             elif is_active and not clutch_snapshot.clutch_down:
-                alt_tab_active = False
-                import handmouse.config as conf
+                pointer.reset()
+                
+            if is_active:
                 if alt_tab_detector is not None and conf.ACTIVE_CONFIG.gesture_switches.alt_tab:
-                    if interlock.is_active or drag_active:
-                        alt_tab_detector.reset()
-                    else:
-                        alt_tab_state, is_alt_held = alt_tab_detector.update(hand_result.landmarks, now_ms)
-                        if alt_tab_state == AltTabState.ACTIVE or is_alt_held:
-                            alt_tab_active = True
-                            if not was_alt_tab_active and osd is not None:
-                                osd.show_text("Task View")
-                was_alt_tab_active = alt_tab_active
+                    candidates.extend(alt_tab_detector.update(hand_result.landmarks, now_ms))
 
-                if alt_tab_active:
-                    if drag_active:
-                        mouse.left_up()
-                        drag_active = False
-                    pointer.reset()
-                    gesture_result = gesture.update(None, None, now_ms)
-                    grab_scroll.reset()
-                    grab_result = _neutral_grab_result()
-                    shortcut_should_reset = True
-                else:
-                    if not drag_active:
-                        pointer.reset()
-                    thumb_tip = hand_result.thumb_tip
-                    index_tip = hand_result.index_tip
-                    middle_tip = None
-                    if hand_result.landmarks and len(hand_result.landmarks) > 12:
-                        middle_tip = hand_result.landmarks[12]
-
-                    # Heuristic to prevent false pinches when fingers are curled into a fist
-                    if _is_finger_curled(hand_result.landmarks, 5, 8):
-                        index_tip = None
-                    if _is_finger_curled(hand_result.landmarks, 9, 12):
-                        middle_tip = None
-
-                    gesture_result = gesture.update(
-                        thumb_tip,
-                        index_tip,
-                        now_ms,
-                        middle=middle_tip,
-                    )
-                    grab_result = grab_scroll.update(hand_result.landmarks, now_ms)
-                    
-                    is_grabbing = grab_result.state in (GrabScrollState.GRABBING, GrabScrollState.DRAGGING)
-                    if is_grabbing and not was_grabbing and osd is not None:
-                        osd.show_text("Scroll")
-                    was_grabbing = is_grabbing
-
-                    # Drag & Drop logic
-                    if gesture_result.state == GestureState.PINCH_PRESSED:
-                        pinch_start_point = index_tip
-                    elif gesture_result.state == GestureState.PINCH_HOLD and conf.ACTIVE_CONFIG.gesture_switches.drag_drop:
-                        if not drag_active and pinch_start_point is not None and index_tip is not None:
-                            dist = ((index_tip.x - pinch_start_point.x) ** 2 + 
-                                    (index_tip.y - pinch_start_point.y) ** 2) ** 0.5
-                            if dist > 0.04:  # drag threshold
-                                drag_active = True
-                                mouse.left_down()
-                                if osd is not None: osd.show_text("Drag")
-                        
-                        if drag_active:
-                            delta = pointer.update(hand_result, now_ms)
-                            if delta is not None and (delta.dx != 0 or delta.dy != 0):
-                                mouse.move_relative(delta)
-                                dx = delta.dx
-                                dy = delta.dy
-
-                    if gesture_result.state not in (GestureState.PINCH_PRESSED, GestureState.PINCH_HOLD, GestureState.COOLDOWN):
-                        if drag_active:
-                            mouse.left_up()
-                            drag_active = False
-
-                    if gesture_result.should_click or gesture_result.should_double_click:
-                        if drag_active:
-                            mouse.left_up()
-                            drag_active = False
-                        else:
-                            if gesture_result.should_double_click and conf.ACTIVE_CONFIG.gesture_switches.double_click:
-                                mouse.double_click()
-                                if osd is not None: osd.show_text("Double Click")
-                            else:
-                                mouse.left_click()
-                                if osd is not None: osd.show_text("Click")
-
-                    if gesture_result.should_right_click and conf.ACTIVE_CONFIG.gesture_switches.right_click:
-                        if drag_active:
-                            mouse.left_up()
-                            drag_active = False
-                        mouse.right_click()
-                        if osd is not None: osd.show_text("Right Click")
+                candidates.extend(grab_scroll.update(obs, now_ms))
+                candidates.extend(gesture.update(obs, now_ms))
+                
+                index_tip = hand_result.index_tip if hand_result else None
+                candidates.extend(shortcut_detector.update(obs, now_ms, index_tip, palm_open=palm_visible))
             else:
                 if alt_tab_detector is not None:
                     alt_tab_detector.reset()
-                if drag_active:
-                    mouse.left_up()
-                    drag_active = False
-                gesture_result = gesture.update(None, None, now_ms)
-                pointer.reset()
+                gesture.reset()
                 grab_scroll.reset()
-                grab_result = _neutral_grab_result()
-                shortcut_should_reset = True
-            if is_active and not clutch_snapshot.clutch_down and grab_result.scroll_delta != 0:
-                shortcut.scroll(grab_result.scroll_delta)
-                
-            if grab_result.is_grab_pose:
-                grab_release_cooldown_until = now_ms + 800
+                shortcut_detector.reset()
+                pointer.reset()
 
-            if shortcut_should_reset or move_active or clutch_snapshot.clutch_down or interlock.is_active or drag_active:
-                shortcut_detector.reset()
-            elif not is_active or hand_result.index_tip is None or grab_result.is_grab_pose or now_ms < grab_release_cooldown_until:
-                shortcut_detector.reset()
-            else:
-                shortcut_result = shortcut_detector.update(hand_result.index_tip, now_ms, palm_open=palm_visible)
-                if shortcut_result.action is not None:
-                    is_palm_swipe = shortcut_result.action in (ShortcutAction.SWIPE_LEFT_PALM, ShortcutAction.SWIPE_RIGHT_PALM)
-                    if not is_palm_swipe or conf.ACTIVE_CONFIG.gesture_switches.win_d:
-                        shortcut.execute(shortcut_result.action)
-                        if osd is not None:
-                            action_names = {
-                                ShortcutAction.SWIPE_LEFT_PALM: "Desktop (Win+D)",
-                                ShortcutAction.SWIPE_RIGHT_PALM: "Desktop (Win+D)",
-                                ShortcutAction.SWIPE_UP: "Scroll Down",
-                                ShortcutAction.SWIPE_DOWN: "Scroll Up",
-                                ShortcutAction.SWIPE_LEFT: "Back",
-                                ShortcutAction.SWIPE_RIGHT: "Forward",
-                            }
-                            if shortcut_result.action in action_names:
-                                osd.show_text(action_names[shortcut_result.action])
+            if candidates:
+                intents = policy.evaluate(obs, quality, candidates, {})
+                dispatches = action_router.dispatch(intents, {})
+                
+                for dispatch in dispatches:
+                    if dispatch.action == "task_view" and dispatch.executed:
+                        last_task_view_ms = now_ms
+
+
         except Exception as exc:
             if _is_failsafe_abort(exc):
                 _abort_control(
@@ -543,17 +482,21 @@ def _run_loop(
             backend_name=camera.backend_name,
             pointer=pointer,
             engagement=engagement_result,
-            grab_scroll=grab_result,
             clutch_down=clutch_snapshot.clutch_down,
             clutch_status=clutch_status,
             move_mode=move_mode_result.state.name,
+            candidates=candidates if 'candidates' in locals() else None,
+            dispatches=dispatches if 'dispatches' in locals() else None,
             move_pose=move_mode_result.move_pose,
         )
 
         debug_frame = debug_view.draw(
             frame,
             raw_hand_result,
-            gesture_result,
+            __import__('types').SimpleNamespace(
+                state=getattr(gesture, "_left_state", GestureState.PINCH_OPEN), 
+                pinch_distance=getattr(gesture, "last_distance", 1.0)
+            ),
             is_active,
             telemetry,
         )
@@ -601,8 +544,8 @@ def _apply_runtime_settings(
     # Update gesture config
     if hasattr(gesture, "config"):
         gesture.config = GestureConfig(
-            pinch_close=config.gesture_config.pinch_close,
-            pinch_open=config.gesture_config.pinch_open,
+            pinch_close_ratio=config.gesture_config.pinch_close_ratio,
+            pinch_open_ratio=config.gesture_config.pinch_open_ratio,
         )
     # Update grab scroll config
     if hasattr(grab_scroll, "config"):

@@ -5,7 +5,7 @@ from typing import Any
 
 from handmouse.config import DEFAULT_CONFIG, AppConfig
 from handmouse.engagement import EngagementResult
-from handmouse.gesture_detector import GestureResult, GestureState
+from handmouse.gesture_detector import GestureState
 from handmouse.hand_tracker import HandTrackingResult
 from handmouse.pointer_engine import PointerEngine
 from handmouse.types import FramePoint
@@ -50,12 +50,14 @@ class DebugTelemetry:
     clutch_status: str | None = None
     move_mode: str | None = None
     move_pose: bool | None = None
+    dispatches: list[Any] | None = None
+    candidates: list[Any] | None = None
 
 
 class DebugView:
-    PINCH_BAR_MAX_DISTANCE = 0.15
-    PINCH_CLOSE_THRESHOLD = 0.05
-    PINCH_OPEN_THRESHOLD = 0.075
+    PINCH_BAR_MAX_DISTANCE = 1.2
+    PINCH_CLOSE_THRESHOLD = 0.5
+    PINCH_OPEN_THRESHOLD = 0.7
 
     def __init__(self, config: AppConfig = DEFAULT_CONFIG) -> None:
         self.config = config
@@ -297,13 +299,23 @@ class DebugView:
             f"Clutch: {clutch}",
             f"Move mode: {move_mode} pose={move_pose}",
             f"Pointer: state={pointer_state} v={pointer_velocity} gain={pointer_gain} depth={pointer_depth} scale={pointer_hand_scale}",
-            f"Pinch: state={_gesture_state_name(gesture_result)} d={pinch_distance} (close={self.config.gesture_config.pinch_close:.3f} open={self.config.gesture_config.pinch_open:.3f})",
+            f"Pinch: state={_gesture_state_name(gesture_result)} d={pinch_distance} (close={self.config.gesture_config.pinch_close_ratio:.3f} open={self.config.gesture_config.pinch_open_ratio:.3f})",
             f"Grab: state={grab_state} active={grab_active} scroll={grab_scroll}",
+        ]
+        if telemetry is not None:
+            if telemetry.candidates:
+                cands = [c.gesture for c in telemetry.candidates]
+                lines.append(f"Candidates: {cands}")
+            if telemetry.dispatches:
+                disp = [d.action for d in telemetry.dispatches if d.executed]
+                lines.append(f"Dispatched: {disp}")
+        
+        lines.extend([
             f"FPS: {fps_value:.1f}",
             f"Frame age: {frame_age}",
             f"Backend: {backend}",
             f"Hand: {_hand_info(hand_result)}",
-        ]
+        ])
 
         import handmouse.coordinate_mapper as coordinate_mapper
         if coordinate_mapper.DEBUG_CROSS:
@@ -354,15 +366,15 @@ class DebugView:
         normalized = min(max(distance / self.PINCH_BAR_MAX_DISTANCE, 0.0), 1.0)
         fill_w = int(bar_w * normalized)
 
-        close_x = bar_x + int(bar_w * (self.config.gesture_config.pinch_close / self.PINCH_BAR_MAX_DISTANCE))
+        close_x = bar_x + int(bar_w * (self.config.gesture_config.pinch_close_ratio / self.PINCH_BAR_MAX_DISTANCE))
         cv2.line(frame, (close_x, bar_y - 4), (close_x, bar_y + bar_h + 4), (80, 255, 120), 2)
 
-        open_x = bar_x + int(bar_w * (self.config.gesture_config.pinch_open / self.PINCH_BAR_MAX_DISTANCE))
+        open_x = bar_x + int(bar_w * (self.config.gesture_config.pinch_open_ratio / self.PINCH_BAR_MAX_DISTANCE))
         cv2.line(frame, (open_x, bar_y - 4), (open_x, bar_y + bar_h + 4), (80, 180, 255), 2)
 
-        if distance < self.config.gesture_config.pinch_close:
+        if distance < self.config.gesture_config.pinch_close_ratio:
             fill_color = (80, 255, 120)
-        elif distance < self.config.gesture_config.pinch_open:
+        elif distance < self.config.gesture_config.pinch_open_ratio:
             fill_color = (80, 200, 255)
         else:
             fill_color = (180, 180, 180)

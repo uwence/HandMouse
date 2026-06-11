@@ -168,6 +168,7 @@ def test_video_mode_returns_empty_when_no_hand(monkeypatch: pytest.MonkeyPatch) 
     assert output.thumb_tip is None
     assert output.index_tip is None
     assert output.raw_landmarks is None
+    assert output.world_landmarks is None
     assert output.handedness_label is None
     assert output.handedness_confidence is None
 

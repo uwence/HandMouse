@@ -7,7 +7,7 @@ import pytest
 
 from handmouse.config import DEFAULT_CONFIG
 from handmouse.debug_view import DebugTelemetry, DebugView
-from handmouse.gesture_detector import GestureResult, GestureState
+from handmouse.gesture_detector import GestureState
 from handmouse.types import FramePoint, ScreenPoint
 
 
@@ -46,15 +46,7 @@ def test_debug_view_draw(monkeypatch: pytest.MonkeyPatch) -> None:
         handedness_confidence=0.95,
     )
     
-    gesture_result = GestureResult(
-        state=GestureState.PINCH_HOLD,
-        should_click=False,
-        pinch_distance=0.04,
-        right_state=GestureState.PINCH_OPEN,
-        should_right_click=False,
-        right_pinch_distance=None,
-        should_double_click=False,
-    )
+    gesture_result = None
 
     pointer = SimpleNamespace(
         state=SimpleNamespace(name="ACTIVE"),
