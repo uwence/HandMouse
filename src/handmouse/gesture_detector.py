@@ -19,6 +19,7 @@ class GestureConfig:
     release_confirm_frames: int = 2
     cooldown_ms: int = 150
     emit_on_release: bool = True
+    bimanual_mode: bool = False
 
 
 class GestureState(Enum):
@@ -46,7 +47,7 @@ class GestureDetector:
         self._right_release_count = 0
         self._right_cooldown_until_ms = 0
 
-    def update(self, obs: HandObservation | None, now_ms: int) -> list[GestureCandidate]:
+    def update(self, obs: HandObservation | None, now_ms: int, mode_is_secondary: bool = False) -> list[GestureCandidate]:
         if obs is None or not obs.image_landmarks or len(obs.image_landmarks) < 21:
             self.reset()
             return []
@@ -148,12 +149,17 @@ class GestureDetector:
                             if self._last_left_click_ms > 0 and now_ms - self._last_left_click_ms < 300:
                                 candidates.append(GestureCandidate("pinch", "double_click", "fire", 1.0, RiskClass.MEDIUM, True))
                                 self._last_left_click_ms = 0
+                            elif mode_is_secondary:
+                                candidates.append(GestureCandidate("pinch", "click_right", "fire", 1.0, RiskClass.MEDIUM, True))
+                                self._last_left_click_ms = 0
                             else:
                                 candidates.append(GestureCandidate("pinch", "click_left", "fire", 1.0, RiskClass.MEDIUM, True))
                                 self._last_left_click_ms = now_ms
 
-        # 2. Update Right State Machine
-        if self._left_state != GestureState.PINCH_OPEN:
+        # 2. Update Right State Machine — disabled in bimanual_mode
+        if self.config.bimanual_mode:
+            pass
+        elif self._left_state != GestureState.PINCH_OPEN:
             self._right_state = GestureState.PINCH_OPEN
             self._right_close_count = 0
             self._right_release_count = 0
