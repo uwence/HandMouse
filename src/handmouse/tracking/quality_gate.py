@@ -6,7 +6,7 @@ class TrackingQualityGate:
     def __init__(
         self, 
         max_stale_ms: int = 80, 
-        min_palm_span_px: float = 90.0, 
+        min_palm_span_px: float = 50.0, 
         min_stable_frames: int = 4, 
         handedness_min_score: float = 0.75
     ):

@@ -11,6 +11,7 @@ import handmouse.coordinate_mapper as coordinate_mapper
 from handmouse.app import _is_palm_facing_camera, _mirror_frame, _run_loop
 from handmouse.clutch_input import ClutchSnapshot
 from handmouse.config import PolicyConfig
+from handmouse.gesture_detector import GestureState
 from handmouse.hand_tracker import HandTrackingResult
 from handmouse.mouse_controller import MouseFailsafeTriggered
 from handmouse.interlock import InteractionInterlock
@@ -62,6 +63,7 @@ class FakeTracker:
 class FakePointer:
     def __init__(self, updates: list[object]) -> None:
         self.updates = list(updates)
+        self.update_calls: list[tuple[object, int]] = []
         self.reset_calls = 0
         self.last_velocity = None
         self.last_gain = None
@@ -70,6 +72,7 @@ class FakePointer:
         self.state = SimpleNamespace(name="IDLE")
 
     def update(self, hand_result: object, now_ms: int) -> object:
+        self.update_calls.append((hand_result, now_ms))
         assert self.updates, "no pointer updates left"
         return self.updates.pop(0)
 
@@ -110,9 +113,31 @@ class FakeShortcutDetector:
         self.results = list(results)
         self.update_calls: list[tuple[object, int]] = []
 
-    def update(self, obs: object, now_ms: int, point: object, palm_open: bool = False) -> object:
-        self.update_calls.append((obs, now_ms, point, palm_open))
+    def update(
+        self,
+        obs: object,
+        now_ms: int,
+        point: object,
+        palm_open: bool = False,
+        generic_pose_active: bool = False,
+    ) -> object:
+        self.update_calls.append((obs, now_ms, point, palm_open, generic_pose_active))
         assert self.results, "no shortcut results left"
+        return self.results.pop(0)
+
+    def reset(self) -> None:
+        self.reset_calls += 1
+
+
+class FakeAltTabDetector:
+    def __init__(self, results: list[object]) -> None:
+        self.results = list(results)
+        self.update_calls: list[tuple[object, int]] = []
+        self.reset_calls = 0
+
+    def update(self, landmarks: object, now_ms: int) -> object:
+        self.update_calls.append((landmarks, now_ms))
+        assert self.results, "no alt-tab results left"
         return self.results.pop(0)
 
     def reset(self) -> None:
@@ -278,11 +303,11 @@ def make_palm_facing_landmarks(*, handedness: str) -> list[FramePoint]:
     landmarks[0] = FramePoint(0.5, 0.8)
     landmarks[9] = FramePoint(0.5, 0.55)
     if handedness == "Left":
-        landmarks[5] = FramePoint(0.65, 0.6)
-        landmarks[17] = FramePoint(0.35, 0.6)
-    else:
         landmarks[5] = FramePoint(0.35, 0.6)
         landmarks[17] = FramePoint(0.65, 0.6)
+    else:
+        landmarks[5] = FramePoint(0.65, 0.6)
+        landmarks[17] = FramePoint(0.35, 0.6)
     landmarks[4] = FramePoint(landmarks[5].x, 0.45)
     landmarks[8] = FramePoint(landmarks[5].x, 0.35)
     landmarks[12] = FramePoint(0.5, 0.35)
@@ -296,11 +321,11 @@ def make_back_of_hand_landmarks(*, handedness: str) -> list[FramePoint]:
     landmarks[0] = FramePoint(0.5, 0.8)
     landmarks[9] = FramePoint(0.5, 0.55)
     if handedness == "Left":
-        landmarks[5] = FramePoint(0.35, 0.6)
-        landmarks[17] = FramePoint(0.65, 0.6)
-    else:
         landmarks[5] = FramePoint(0.65, 0.6)
         landmarks[17] = FramePoint(0.35, 0.6)
+    else:
+        landmarks[5] = FramePoint(0.35, 0.6)
+        landmarks[17] = FramePoint(0.65, 0.6)
     return landmarks
 
 
@@ -483,6 +508,9 @@ def test_run_loop_preserves_landmark_z_and_logs_world_z(
     assert frame_samples[0]["world_landmarks"][8] == pytest.approx(
         [world_landmarks[8].x, world_landmarks[8].y, world_landmarks[8].z]
     )
+    assert frame_samples[0]["handedness_label"] == "Left"
+    assert frame_samples[0]["handedness_confidence"] == pytest.approx(0.99)
+    assert frame_samples[0]["input_is_mirrored"] is config_module.ACTIVE_CONFIG.camera.input_is_mirrored
 
 
 def test_run_loop_does_not_mask_missing_hand_when_clutch_is_down() -> None:
@@ -706,6 +734,264 @@ def test_run_loop_syncs_policy_settings_from_active_config(
     assert policy.explicit_confirm_required is True
 
 
+def test_run_loop_mirrors_pointer_input_when_preview_is_mirrored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cv2 = FakeCv2(wait_keys=[0, ord("q")])
+    original_config = config_module.ACTIVE_CONFIG
+    monkeypatch.setattr(
+        config_module,
+        "ACTIVE_CONFIG",
+        original_config.__class__(
+            camera=original_config.camera,
+            pointer=original_config.pointer,
+            shortcut=original_config.shortcut,
+            clutch=original_config.clutch,
+            schema_version=original_config.schema_version,
+            policy=original_config.policy,
+            gesture_switches=original_config.gesture_switches,
+            gesture_config=original_config.gesture_config,
+            grab_scroll_config=original_config.grab_scroll_config,
+            view=original_config.view.__class__(render_mirrored=True),
+            show_osd=original_config.show_osd,
+        ),
+    )
+    pointer = FakePointer(updates=[ScreenDelta(0, 0)])
+    landmarks = make_palm_facing_landmarks(handedness="Right")
+    hand_result = SimpleNamespace(
+        landmarks=landmarks,
+        thumb_tip=landmarks[4],
+        index_tip=landmarks[8],
+        raw_landmarks=None,
+        world_landmarks=None,
+        handedness_label="Right",
+        handedness_confidence=0.99,
+    )
+
+    _run_loop(
+        cv2=cv2,
+        camera=FakeCamera(frames=[object(), object()]),
+        tracker=FakeTracker([hand_result, hand_result]),
+        pointer=pointer,
+        gesture=FakeGesture([[]]),
+        grab_scroll=FakeGrabScroll([[]]),
+        shortcut_detector=FakeShortcutDetector([[]]),
+        engagement=FakeEngagement(
+            [
+                make_engagement_result(active=True, state="ACTIVE"),
+                make_engagement_result(active=False, state="IDLE", reason="escape"),
+            ]
+        ),
+        mouse=FakeMouse(),
+        shortcut=FakeShortcutController(),
+        debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
+    )
+
+    mirrored_hand_result, _ = pointer.update_calls[0]
+    assert mirrored_hand_result.index_tip is not None
+    assert mirrored_hand_result.index_tip.x == pytest.approx(1.0 - hand_result.index_tip.x)
+    assert mirrored_hand_result.index_tip.y == pytest.approx(hand_result.index_tip.y)
+
+
+def test_run_loop_does_not_move_pointer_during_pinch_hold_before_drag_dispatch() -> None:
+    cv2 = FakeCv2(wait_keys=[0, ord("q")])
+    pointer = FakePointer(updates=[])
+    gesture = FakeGesture([[]])
+    gesture._left_state = GestureState.PINCH_HOLD
+    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=make_palm_facing_landmarks(handedness="Right"))
+
+    _run_loop(
+        cv2=cv2,
+        camera=FakeCamera(frames=[object(), object()]),
+        tracker=FakeTracker([hand_result, hand_result]),
+        pointer=pointer,
+        gesture=gesture,
+        grab_scroll=FakeGrabScroll([[]]),
+        shortcut_detector=FakeShortcutDetector([[]]),
+        engagement=FakeEngagement(
+            [
+                make_engagement_result(active=True, state="ACTIVE"),
+                make_engagement_result(active=False, state="IDLE", reason="escape"),
+            ]
+        ),
+        mouse=FakeMouse(),
+        shortcut=FakeShortcutController(),
+        debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
+    )
+
+    assert pointer.update_calls == []
+
+
+def test_run_loop_suppresses_task_view_detector_while_move_mode_active() -> None:
+    cv2 = FakeCv2(wait_keys=[0, ord("q")])
+    alt_tab = FakeAltTabDetector([[GestureCandidate("task_view", "task_view", "fire", 1.0, RiskClass.HIGH, True)]])
+    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=make_palm_facing_landmarks(handedness="Right"))
+
+    _run_loop(
+        cv2=cv2,
+        camera=FakeCamera(frames=[object(), object()]),
+        tracker=FakeTracker([hand_result, hand_result]),
+        pointer=FakePointer(updates=[ScreenDelta(0, 0)]),
+        gesture=FakeGesture([[]]),
+        grab_scroll=FakeGrabScroll([[]]),
+        shortcut_detector=FakeShortcutDetector([[]]),
+        engagement=FakeEngagement(
+            [
+                make_engagement_result(active=True, state="ACTIVE"),
+                make_engagement_result(active=False, state="IDLE", reason="escape"),
+            ]
+        ),
+        mouse=FakeMouse(),
+        shortcut=FakeShortcutController(),
+        debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
+        alt_tab_detector=alt_tab,
+        clutch_input=FakeClutchInput([ClutchSnapshot(clutch_down=True), ClutchSnapshot(clutch_down=True)]),
+        move_mode=FakeMoveMode(
+            [
+                make_move_mode_result(
+                    state=MoveModeState.ACTIVE,
+                    movement_enabled=True,
+                    move_pose=True,
+                    clutch_down=True,
+                ),
+            ]
+        ),
+    )
+
+    assert alt_tab.update_calls == []
+    assert alt_tab.reset_calls >= 1
+
+
+def test_run_loop_resets_task_view_detector_when_open_is_blocked() -> None:
+    cv2 = FakeCv2(wait_keys=[0, ord("q")])
+    alt_tab = FakeAltTabDetector([[GestureCandidate("task_view", "task_view", "fire", 1.0, RiskClass.HIGH, True)]])
+    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=make_palm_facing_landmarks(handedness="Right"))
+    hand_result.handedness_label = "Right"
+
+    _run_loop(
+        cv2=cv2,
+        camera=FakeCamera(frames=[object(), object()]),
+        tracker=FakeTracker([hand_result, hand_result]),
+        pointer=FakePointer(updates=[ScreenDelta(0, 0)]),
+        gesture=FakeGesture([[]]),
+        grab_scroll=FakeGrabScroll([[]]),
+        shortcut_detector=FakeShortcutDetector([[]]),
+        engagement=FakeEngagement(
+            [
+                make_engagement_result(active=True, state="ACTIVE"),
+                make_engagement_result(active=False, state="IDLE", reason="escape"),
+            ]
+        ),
+        mouse=FakeMouse(),
+        shortcut=FakeShortcutController(),
+        debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
+        alt_tab_detector=alt_tab,
+        clutch_input=FakeClutchInput([ClutchSnapshot(clutch_down=False), ClutchSnapshot(clutch_down=False)]),
+        move_mode=FakeMoveMode(
+            [
+                make_move_mode_result(
+                    state=MoveModeState.NEUTRAL,
+                    movement_enabled=False,
+                    move_pose=False,
+                    clutch_down=False,
+                ),
+            ]
+        ),
+    )
+
+    assert alt_tab.update_calls != []
+    assert alt_tab.reset_calls >= 1
+
+
+def test_run_loop_uses_palm_center_for_shortcut_detection() -> None:
+    cv2 = FakeCv2(wait_keys=[0, ord("q")])
+    shortcut_detector = FakeShortcutDetector([[]])
+    landmarks = make_palm_facing_landmarks(handedness="Right")
+    hand_result = make_hand_result(index_tip=FramePoint(0.9, 0.1), landmarks=landmarks)
+    hand_result.handedness_label = "Right"
+
+    _run_loop(
+        cv2=cv2,
+        camera=FakeCamera(frames=[object(), object()]),
+        tracker=FakeTracker([hand_result, hand_result]),
+        pointer=FakePointer(updates=[ScreenDelta(0, 0)]),
+        gesture=FakeGesture([[]]),
+        grab_scroll=FakeGrabScroll([[]]),
+        shortcut_detector=shortcut_detector,
+        engagement=FakeEngagement(
+            [
+                make_engagement_result(active=True, state="ACTIVE"),
+                make_engagement_result(active=False, state="IDLE", reason="escape"),
+            ]
+        ),
+        mouse=FakeMouse(),
+        shortcut=FakeShortcutController(),
+        debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
+        clutch_input=FakeClutchInput([ClutchSnapshot(clutch_down=False), ClutchSnapshot(clutch_down=False)]),
+        move_mode=FakeMoveMode(
+            [
+                make_move_mode_result(
+                    state=MoveModeState.NEUTRAL,
+                    movement_enabled=False,
+                    move_pose=False,
+                    clutch_down=False,
+                ),
+            ]
+        ),
+    )
+
+    _, _, shortcut_point, _, generic_pose_active = shortcut_detector.update_calls[0]
+    assert shortcut_point is not None
+    assert shortcut_point.x == pytest.approx(0.5)
+    assert shortcut_point.y == pytest.approx(0.61)
+    assert generic_pose_active is False
+
+
+def test_run_loop_suppresses_shortcut_detector_while_move_mode_active() -> None:
+    cv2 = FakeCv2(wait_keys=[0, ord("q")])
+    shortcut_detector = FakeShortcutDetector([[GestureCandidate("shortcut", "swipe_up", "fire", 1.0, RiskClass.MEDIUM, True)]])
+    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=make_palm_facing_landmarks(handedness="Right"))
+
+    _run_loop(
+        cv2=cv2,
+        camera=FakeCamera(frames=[object(), object()]),
+        tracker=FakeTracker([hand_result, hand_result]),
+        pointer=FakePointer(updates=[ScreenDelta(0, 0)]),
+        gesture=FakeGesture([[]]),
+        grab_scroll=FakeGrabScroll([[]]),
+        shortcut_detector=shortcut_detector,
+        engagement=FakeEngagement(
+            [
+                make_engagement_result(active=True, state="ACTIVE"),
+                make_engagement_result(active=False, state="IDLE", reason="escape"),
+            ]
+        ),
+        mouse=FakeMouse(),
+        shortcut=FakeShortcutController(),
+        debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
+        clutch_input=FakeClutchInput([ClutchSnapshot(clutch_down=True), ClutchSnapshot(clutch_down=True)]),
+        move_mode=FakeMoveMode(
+            [
+                make_move_mode_result(
+                    state=MoveModeState.ACTIVE,
+                    movement_enabled=True,
+                    move_pose=True,
+                    clutch_down=True,
+                ),
+            ]
+        ),
+    )
+
+    assert shortcut_detector.update_calls == []
+    assert shortcut_detector.reset_calls >= 1
+
+
 def test_run_loop_unifies_threaded_result_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -752,11 +1038,17 @@ def test_build_frame_sample_schema_contains_world_z_and_quality() -> None:
         world_landmarks=[[0.1, 0.2, 0.3]],
         quality_score=0.91,
         quality_reasons=("stable",),
+        handedness_label="Right",
+        handedness_confidence=0.88,
+        input_is_mirrored=True,
     )
 
     assert payload["schema_version"] == 2
     assert payload["world_landmarks"][0] == [0.1, 0.2, 0.3]
     assert payload["quality_score"] == 0.91
+    assert payload["handedness_label"] == "Right"
+    assert payload["handedness_confidence"] == pytest.approx(0.88)
+    assert payload["input_is_mirrored"] is True
 
 
 def test_coordinate_mapper_preserves_physical_handedness_and_world_landmarks() -> None:

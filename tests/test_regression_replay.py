@@ -246,7 +246,6 @@ def test_regression_alt_tab_and_navigation(monkeypatch: pytest.MonkeyPatch) -> N
     series.append(commit)
 
     report = run_pipeline_simulation(series)
-    
-    assert report["committed"]["task_view"] == 1
-    assert report["committed"]["nav_left"] >= 1
-    assert report["committed"]["task_view_commit"] == 1
+
+    assert report["blocked"]["task_view"]["explicit_confirm_required"] == 1
+    assert report["dispatched"] == {}

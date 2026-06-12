@@ -20,10 +20,12 @@ class TelemetryWriter:
         if log_file is not None:
             self.log_file = os.path.expanduser(log_file)
             self.log_dir = os.path.dirname(self.log_file) or "."
+            self._file_mode = "w"
         else:
             self.log_dir = os.path.expanduser(log_dir)
             timestamp = time.strftime("%Y-%m-%dT%H-%M-%SZ")
             self.log_file = os.path.join(self.log_dir, f"session_{timestamp}.ndjson")
+            self._file_mode = "a"
         os.makedirs(self.log_dir, exist_ok=True)
         
         self._queue = queue.Queue(maxsize=10000)
@@ -55,7 +57,7 @@ class TelemetryWriter:
             self._thread.join(timeout=2.0)
             
     def _worker(self) -> None:
-        with open(self.log_file, "a", encoding="utf-8") as f:
+        with open(self.log_file, self._file_mode, encoding="utf-8") as f:
             while not self._stop_event.is_set() or not self._queue.empty():
                 try:
                     record = self._queue.get(timeout=0.1)

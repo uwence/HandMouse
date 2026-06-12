@@ -36,7 +36,7 @@ def _build_settings_ui(root) -> None:
     _gui_window = top
 
     top.title("HandMouse Settings")
-    top.geometry("450x760")
+    top.geometry("450x820")
     top.resizable(False, False)
 
     # Configure dark theme colors
@@ -47,7 +47,7 @@ def _build_settings_ui(root) -> None:
     entry_bg = "#313244"       # Input background
     button_hover = "#b4befe"   # Purple/light blue
 
-    root.configure(bg=bg_color)
+    top.configure(bg=bg_color)
 
     # Fonts
     font_family = "Segoe UI"
@@ -66,6 +66,43 @@ def _build_settings_ui(root) -> None:
     style.map("TCheckbutton", background=[("active", bg_color)], foreground=[("active", accent_color)])
     style.configure("TCombobox", fieldbackground=entry_bg, background=card_color, foreground=text_color, font=label_font)
     
+    content = tk.Frame(top, bg=bg_color)
+    content.pack(fill="both", expand=True)
+
+    canvas = tk.Canvas(content, bg=bg_color, highlightthickness=0, bd=0)
+    scrollbar = ttk.Scrollbar(content, orient="vertical", command=canvas.yview)
+    scroll_inner = tk.Frame(canvas, bg=bg_color)
+
+    scroll_window = canvas.create_window((0, 0), window=scroll_inner, anchor="nw")
+    canvas.configure(yscrollcommand=scrollbar.set)
+
+    def _sync_scroll_region(_: tk.Event | None = None) -> None:
+        canvas.configure(scrollregion=canvas.bbox("all"))
+
+    def _resize_inner(event: tk.Event) -> None:
+        canvas.itemconfigure(scroll_window, width=event.width)
+
+    def _on_mousewheel(event: tk.Event) -> None:
+        delta = getattr(event, "delta", 0)
+        if delta:
+            canvas.yview_scroll(int(-delta / 120), "units")
+
+    def _bind_mousewheel(_: tk.Event | None = None) -> None:
+        top.bind_all("<MouseWheel>", _on_mousewheel)
+
+    def _unbind_mousewheel(_: tk.Event | None = None) -> None:
+        top.unbind_all("<MouseWheel>")
+
+    scroll_inner.bind("<Configure>", _sync_scroll_region)
+    canvas.bind("<Configure>", _resize_inner)
+    canvas.bind("<Enter>", _bind_mousewheel)
+    canvas.bind("<Leave>", _unbind_mousewheel)
+    scroll_inner.bind("<Enter>", _bind_mousewheel)
+    scroll_inner.bind("<Leave>", _unbind_mousewheel)
+
+    canvas.pack(side="left", fill="both", expand=True)
+    scrollbar.pack(side="right", fill="y")
+
     # Custom Frame class for styled card containers
     def create_card(parent, title):
         frame = tk.Frame(parent, bg=card_color, bd=0, highlightthickness=1, highlightbackground="#45475a")
@@ -76,7 +113,7 @@ def _build_settings_ui(root) -> None:
         return frame
 
     # Title Banner
-    banner = tk.Canvas(root, height=60, bg=card_color, highlightthickness=0)
+    banner = tk.Canvas(scroll_inner, height=60, bg=card_color, highlightthickness=0)
     banner.pack(fill="x", pady=(0, 10))
     # Draw a gradient-like bar or clean accent line
     banner.create_rectangle(0, 56, 450, 60, fill=accent_color, outline="")
@@ -104,7 +141,7 @@ def _build_settings_ui(root) -> None:
     osd_var = tk.BooleanVar(master=top, value=config.show_osd)
 
     # 1. Camera & Pointer Card
-    card1 = create_card(top, "Camera & Speed Configuration")
+    card1 = create_card(scroll_inner, "Camera & Speed Configuration")
     
     row1 = tk.Frame(card1, bg=card_color)
     row1.pack(fill="x", padx=10, pady=5)
@@ -140,7 +177,7 @@ def _build_settings_ui(root) -> None:
     speed_scale.pack(side="right", fill="x", expand=True, padx=(10, 5))
 
     # 2. Gesture Switches Card
-    card2 = create_card(top, "Enable / Disable Features")
+    card2 = create_card(scroll_inner, "Enable / Disable Features")
     
     grid = tk.Frame(card2, bg=card_color)
     grid.pack(fill="x", padx=10, pady=5)
@@ -153,7 +190,7 @@ def _build_settings_ui(root) -> None:
     ttk.Checkbutton(grid, text="Show On-Screen Display (OSD) feedback", variable=osd_var).pack(anchor="w", pady=3)
 
     # 3. Gesture Sensitivity Card
-    card3 = create_card(top, "Gesture Sensitivity")
+    card3 = create_card(scroll_inner, "Gesture Sensitivity")
 
     row3 = tk.Frame(card3, bg=card_color)
     row3.pack(fill="x", padx=10, pady=5)
@@ -307,7 +344,7 @@ def _build_settings_ui(root) -> None:
             messagebox.showerror("Export Error", f"Failed to export preset: {exc}", parent=top)
 
     # 4. Profile Preset Card
-    card4 = create_card(top, "Preset Profile Management")
+    card4 = create_card(scroll_inner, "Preset Profile Management")
     row_presets = tk.Frame(card4, bg=card_color)
     row_presets.pack(fill="x", padx=10, pady=5)
     
@@ -327,7 +364,7 @@ def _build_settings_ui(root) -> None:
 
     # Action Buttons
     btn_frame = tk.Frame(top, bg=bg_color)
-    btn_frame.pack(fill="x", padx=15, pady=15)
+    btn_frame.pack(side="bottom", fill="x", padx=15, pady=15)
 
     def on_save():
         # Validate pinch thresholds
@@ -381,8 +418,6 @@ def _build_settings_ui(root) -> None:
         conf.ACTIVE_CONFIG = new_config
         
         messagebox.showinfo("Success", "Configuration saved and applied successfully!", parent=top)
-        top.destroy()
-        _gui_window = None
 
     def on_cancel():
         top.destroy()
@@ -408,6 +443,7 @@ def _build_settings_ui(root) -> None:
     def _cleanup():
         global _gui_window
         _gui_window = None
+        _unbind_mousewheel()
         top.destroy()
 
     top.protocol("WM_DELETE_WINDOW", _cleanup)

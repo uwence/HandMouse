@@ -21,7 +21,20 @@ def test_debug_view_draw(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("handmouse.debug_view._load_cv2", lambda: mock_cv2)
     monkeypatch.setattr(sys, "modules", {**sys.modules, "cv2": mock_cv2})
 
-    view = DebugView(DEFAULT_CONFIG)
+    config = DEFAULT_CONFIG.__class__(
+        camera=DEFAULT_CONFIG.camera,
+        pointer=DEFAULT_CONFIG.pointer,
+        shortcut=DEFAULT_CONFIG.shortcut,
+        clutch=DEFAULT_CONFIG.clutch,
+        schema_version=DEFAULT_CONFIG.schema_version,
+        policy=DEFAULT_CONFIG.policy,
+        gesture_switches=DEFAULT_CONFIG.gesture_switches,
+        gesture_config=DEFAULT_CONFIG.gesture_config,
+        grab_scroll_config=DEFAULT_CONFIG.grab_scroll_config,
+        view=DEFAULT_CONFIG.view.__class__(render_mirrored=False),
+        show_osd=DEFAULT_CONFIG.show_osd,
+    )
+    view = DebugView(config)
 
     # Mock frame with shape and copy method
     frame = SimpleNamespace(shape=(480, 640, 3))
@@ -90,3 +103,37 @@ def test_debug_view_draw(monkeypatch: pytest.MonkeyPatch) -> None:
     assert mock_cv2.circle.call_count > 0
     assert mock_cv2.line.call_count > 0
     assert mock_cv2.putText.call_count > 0
+
+
+def test_debug_view_flips_frame_when_render_mirrored_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_cv2 = MagicMock()
+    mock_cv2.LINE_AA = 16
+    mock_cv2.FONT_HERSHEY_SIMPLEX = 0
+    flipped_frame = SimpleNamespace(shape=(480, 640, 3))
+    flipped_frame.copy = lambda: flipped_frame
+    mock_cv2.flip.side_effect = lambda frame, code: flipped_frame
+
+    monkeypatch.setattr("handmouse.debug_view._load_cv2", lambda: mock_cv2)
+    monkeypatch.setattr(sys, "modules", {**sys.modules, "cv2": mock_cv2})
+
+    config = DEFAULT_CONFIG.__class__(
+        camera=DEFAULT_CONFIG.camera,
+        pointer=DEFAULT_CONFIG.pointer,
+        shortcut=DEFAULT_CONFIG.shortcut,
+        clutch=DEFAULT_CONFIG.clutch,
+        schema_version=DEFAULT_CONFIG.schema_version,
+        policy=DEFAULT_CONFIG.policy,
+        gesture_switches=DEFAULT_CONFIG.gesture_switches,
+        gesture_config=DEFAULT_CONFIG.gesture_config,
+        grab_scroll_config=DEFAULT_CONFIG.grab_scroll_config,
+        view=DEFAULT_CONFIG.view.__class__(render_mirrored=True),
+        show_osd=DEFAULT_CONFIG.show_osd,
+    )
+    view = DebugView(config)
+    frame = SimpleNamespace(shape=(480, 640, 3))
+    frame.copy = lambda: frame
+
+    result = view.draw(frame, None, None, control_enabled=False, telemetry=None)
+
+    assert result == flipped_frame
+    mock_cv2.flip.assert_called_once_with(frame, 1)

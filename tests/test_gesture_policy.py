@@ -108,6 +108,36 @@ def test_policy_requires_explicit_confirm_for_task_view_commit() -> None:
     assert decisions[0].payload["blocked_by"] == "explicit_confirm_required"
 
 
+def test_policy_requires_explicit_confirm_for_task_view_open() -> None:
+    policy = GesturePolicy()
+
+    decisions = policy.evaluate(
+        None,
+        make_quality(ok=True),
+        [make_candidate("task_view", RiskClass.HIGH)],
+        {},
+    )
+
+    assert len(decisions) == 1
+    assert decisions[0].committed is False
+    assert decisions[0].payload["blocked_by"] == "explicit_confirm_required"
+
+
+def test_policy_requires_explicit_confirm_for_palm_swipe() -> None:
+    policy = GesturePolicy()
+
+    decisions = policy.evaluate(
+        None,
+        make_quality(ok=True),
+        [make_candidate("swipe_left_palm", RiskClass.HIGH)],
+        {},
+    )
+
+    assert len(decisions) == 1
+    assert decisions[0].committed is False
+    assert decisions[0].payload["blocked_by"] == "explicit_confirm_required"
+
+
 def test_policy_allows_explicit_confirmed_task_view_commit() -> None:
     policy = GesturePolicy()
 
@@ -148,7 +178,7 @@ def test_policy_allows_task_view_cancel_when_quality_is_bad() -> None:
 
 
 def test_policy_blocks_high_risk_during_cooldown() -> None:
-    policy = GesturePolicy(high_risk_cooldown_ms=500)
+    policy = GesturePolicy(high_risk_cooldown_ms=500, explicit_confirm_required=False)
     quality = make_quality(ok=True)
 
     first = policy.evaluate(

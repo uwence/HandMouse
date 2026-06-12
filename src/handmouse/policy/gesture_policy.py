@@ -128,7 +128,12 @@ class GesturePolicy:
     def _requires_explicit_confirm(self, action: str) -> bool:
         if not self.explicit_confirm_required:
             return False
-        return action == "task_view_commit"
+        return action in {
+            "task_view",
+            "task_view_commit",
+            "swipe_left_palm",
+            "swipe_right_palm",
+        }
 
     @staticmethod
     def _cooldown_applies(action: str) -> bool:

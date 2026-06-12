@@ -59,8 +59,8 @@ def test_slow_movement_resets_anchor() -> None:
 def test_swipe_left_emits_candidate() -> None:
     detector = make_detector()
 
-    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5))
-    result = detector.update(make_obs(), now_ms=100, point=FramePoint(0.2, 0.5))
+    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5), generic_pose_active=True)
+    result = detector.update(make_obs(), now_ms=100, point=FramePoint(0.2, 0.5), generic_pose_active=True)
 
     assert len(result) == 1
     assert result[0].gesture == "swipe_left"
@@ -72,8 +72,8 @@ import pytest
 def test_swipe_right_emits_candidate() -> None:
     detector = make_detector()
 
-    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5))
-    result = detector.update(make_obs(), now_ms=100, point=FramePoint(0.8, 0.5))
+    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5), generic_pose_active=True)
+    result = detector.update(make_obs(), now_ms=100, point=FramePoint(0.8, 0.5), generic_pose_active=True)
 
     assert len(result) == 1
     assert result[0].gesture == "swipe_right"
@@ -83,8 +83,8 @@ def test_swipe_right_emits_candidate() -> None:
 def test_swipe_up_emits_candidate() -> None:
     detector = make_detector()
 
-    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5))
-    result = detector.update(make_obs(), now_ms=100, point=FramePoint(0.5, 0.2))
+    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5), generic_pose_active=True)
+    result = detector.update(make_obs(), now_ms=100, point=FramePoint(0.5, 0.2), generic_pose_active=True)
 
     assert len(result) == 1
     assert result[0].gesture == "swipe_up"
@@ -94,8 +94,8 @@ def test_swipe_up_emits_candidate() -> None:
 def test_swipe_down_emits_candidate() -> None:
     detector = make_detector()
 
-    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5))
-    result = detector.update(make_obs(), now_ms=100, point=FramePoint(0.5, 0.8))
+    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5), generic_pose_active=True)
+    result = detector.update(make_obs(), now_ms=100, point=FramePoint(0.5, 0.8), generic_pose_active=True)
 
     assert len(result) == 1
     assert result[0].gesture == "swipe_down"
@@ -105,8 +105,8 @@ def test_swipe_down_emits_candidate() -> None:
 def test_diagonal_swipe_ignored_when_ratio_not_met() -> None:
     detector = make_detector()
 
-    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5))
-    result = detector.update(make_obs(), now_ms=100, point=FramePoint(0.8, 0.8))
+    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5), generic_pose_active=True)
+    result = detector.update(make_obs(), now_ms=100, point=FramePoint(0.8, 0.8), generic_pose_active=True)
 
     assert len(result) == 0
 
@@ -114,14 +114,14 @@ def test_diagonal_swipe_ignored_when_ratio_not_met() -> None:
 def test_cooldown_prevents_immediate_subsequent_swipes() -> None:
     detector = make_detector()
 
-    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5))
-    detector.update(make_obs(), now_ms=100, point=FramePoint(0.2, 0.5))
+    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5), generic_pose_active=True)
+    detector.update(make_obs(), now_ms=100, point=FramePoint(0.2, 0.5), generic_pose_active=True)
     
-    first = detector.update(make_obs(), now_ms=150, point=FramePoint(0.2, 0.5))
+    first = detector.update(make_obs(), now_ms=150, point=FramePoint(0.2, 0.5), generic_pose_active=True)
     assert len(first) == 0
 
-    detector.update(make_obs(), now_ms=250, point=FramePoint(0.5, 0.5))
-    second = detector.update(make_obs(), now_ms=300, point=FramePoint(0.2, 0.5))
+    detector.update(make_obs(), now_ms=250, point=FramePoint(0.5, 0.5), generic_pose_active=True)
+    second = detector.update(make_obs(), now_ms=350, point=FramePoint(0.2, 0.5), generic_pose_active=True)
     assert len(second) == 1
 
 
@@ -131,8 +131,7 @@ def test_palm_swipe_requires_open_palm_hold_before_upgrade() -> None:
     detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5), palm_open=True)
     result = detector.update(make_obs(), now_ms=100, point=FramePoint(0.1, 0.5))
 
-    assert len(result) == 1
-    assert result[0].gesture == "swipe_left"
+    assert result == []
 
 
 def test_palm_swipe_upgrades_after_sustained_open_palm() -> None:
@@ -144,3 +143,24 @@ def test_palm_swipe_upgrades_after_sustained_open_palm() -> None:
 
     assert len(result) == 1
     assert result[0].gesture == "swipe_left_palm"
+
+
+def test_open_palm_vertical_motion_does_not_emit_generic_swipe() -> None:
+    detector = make_detector()
+
+    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5), palm_open=True)
+    detector.update(make_obs(), now_ms=80, point=FramePoint(0.5, 0.5), palm_open=True)
+    result = detector.update(make_obs(), now_ms=160, point=FramePoint(0.5, 0.2), palm_open=True)
+
+    assert result == []
+
+
+def test_slow_large_drift_reanchors_without_swipe() -> None:
+    detector = make_detector()
+
+    detector.update(make_obs(), now_ms=0, point=FramePoint(0.5, 0.5), generic_pose_active=True)
+    result = detector.update(make_obs(), now_ms=450, point=FramePoint(0.75, 0.5), generic_pose_active=True)
+
+    assert result == []
+    assert detector._anchor == FramePoint(0.75, 0.5)
+    assert detector._anchor_ms == 450

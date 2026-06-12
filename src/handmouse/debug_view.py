@@ -77,9 +77,9 @@ class DebugView:
         self._draw_control_region(cv2, frame, width, height)
         self._draw_raw_index_tip(cv2, frame, hand_result, width, height)
 
-        # The incoming frame is now ALWAYS mirrored (forced by camera.py).
-        # So we only need to flip it if the user wants an UNMIRRORED view.
-        if getattr(self.config, "view", None) and not self.config.view.render_mirrored:
+        # The incoming frame is in camera/runtime space. Flip only when the user wants
+        # selfie-style mirrored preview output.
+        if getattr(self.config, "view", None) and self.config.view.render_mirrored:
             frame = cv2.flip(frame, 1)
 
         self._draw_status_panel(

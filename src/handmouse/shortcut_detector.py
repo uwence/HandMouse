@@ -27,6 +27,8 @@ class ShortcutState(Enum):
 
 class ShortcutDetector:
     MIN_PALM_OPEN_MS = 120
+    MIN_SWIPE_ELAPSED_MS = 80
+    MIN_SWIPE_SPEED = 0.0008
 
     def __init__(self, config: ShortcutConfig) -> None:
         self.config = config
@@ -36,7 +38,14 @@ class ShortcutDetector:
         self._palm_was_open = False
         self._palm_open_since_ms: int | None = None
 
-    def update(self, obs: HandObservation | None, now_ms: int, point: FramePoint | None, palm_open: bool = False) -> list[GestureCandidate]:
+    def update(
+        self,
+        obs: HandObservation | None,
+        now_ms: int,
+        point: FramePoint | None,
+        palm_open: bool = False,
+        generic_pose_active: bool = False,
+    ) -> list[GestureCandidate]:
         if obs is None or point is None:
             self.reset()
             return []
@@ -45,10 +54,7 @@ class ShortcutDetector:
             return []
 
         if self._anchor is None or self._anchor_ms is None:
-            self._anchor = point
-            self._anchor_ms = now_ms
-            self._palm_was_open = palm_open
-            self._palm_open_since_ms = now_ms if palm_open else None
+            self._set_anchor(point, now_ms, palm_open)
             return []
 
         self._palm_was_open = self._palm_was_open or palm_open
@@ -60,18 +66,29 @@ class ShortcutDetector:
 
         elapsed_ms = now_ms - self._anchor_ms
         if elapsed_ms > self.config.max_duration_ms:
-            self._anchor = point
-            self._anchor_ms = now_ms
-            self._palm_was_open = palm_open
-            self._palm_open_since_ms = now_ms if palm_open else None
+            self._set_anchor(point, now_ms, palm_open)
             return []
 
         dx = point.x - self._anchor.x
         dy = point.y - self._anchor.y
+        distance = (dx * dx + dy * dy) ** 0.5
         palm_open_ms = 0
         if self._palm_open_since_ms is not None:
             palm_open_ms = now_ms - self._palm_open_since_ms
         palm_swipe_qualified = self._palm_was_open and palm_open_ms >= self.MIN_PALM_OPEN_MS
+
+        if not generic_pose_active:
+            if not palm_swipe_qualified:
+                return []
+            if abs(dx) < abs(dy):
+                self._set_anchor(point, now_ms, palm_open)
+                return []
+
+        if distance >= self.config.min_distance:
+            elapsed_for_speed = max(elapsed_ms, 1)
+            if elapsed_ms < self.MIN_SWIPE_ELAPSED_MS or (distance / elapsed_for_speed) < self.MIN_SWIPE_SPEED:
+                self._set_anchor(point, now_ms, palm_open)
+                return []
 
         action = self._classify(dx, dy, palm_swipe_qualified)
         
@@ -116,6 +133,12 @@ class ShortcutDetector:
         self._anchor_ms = None
         self._palm_was_open = False
         self._palm_open_since_ms = None
+
+    def _set_anchor(self, point: FramePoint, now_ms: int, palm_open: bool) -> None:
+        self._anchor = point
+        self._anchor_ms = now_ms
+        self._palm_was_open = palm_open
+        self._palm_open_since_ms = now_ms if palm_open else None
 
     def _classify(self, dx: float, dy: float, palm_was_open: bool) -> ShortcutAction | None:
         abs_x = abs(dx)

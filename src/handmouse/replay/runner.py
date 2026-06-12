@@ -31,11 +31,22 @@ class ReplayRunner:
         committed: Counter[str] = Counter()
         blocked: dict[str, Counter[str]] = defaultdict(Counter)
         dispatched: Counter[str] = Counter()
+        frame_samples_total = 0
+        frame_samples_hand_found = 0
+        handedness: Counter[str] = Counter()
 
         for record in records:
             event = record.get("event")
             if event:
                 events_count[event] += 1
+
+            if event == "frame_sample":
+                frame_samples_total += 1
+                if record.get("hand_found"):
+                    frame_samples_hand_found += 1
+                label = record.get("handedness_label")
+                if label:
+                    handedness[str(label)] += 1
 
             if event == "gesture_decision":
                 action = record.get("action", "unknown")
@@ -49,6 +60,14 @@ class ReplayRunner:
 
         return {
             "events": dict(events_count),
+            "frame_samples": {
+                "total": frame_samples_total,
+                "hand_found": frame_samples_hand_found,
+                "hand_found_pct": round((frame_samples_hand_found / frame_samples_total) * 100, 2)
+                if frame_samples_total
+                else 0.0,
+                "handedness": dict(handedness),
+            },
             "committed": dict(committed),
             "blocked": {action: dict(reasons) for action, reasons in blocked.items()},
             "dispatched": dict(dispatched),
@@ -62,6 +81,15 @@ def analyze_telemetry(ndjson_path: str) -> None:
     print("Event Counts:")
     for event, count in report["events"].items():
         print(f"  {event}: {count}")
+
+    print("\nFrame Sample Summary:")
+    frame_samples = report["frame_samples"]
+    print(f"  total: {frame_samples['total']}")
+    print(f"  hand_found: {frame_samples['hand_found']} ({frame_samples['hand_found_pct']}%)")
+    if frame_samples["handedness"]:
+        print(f"  handedness: {frame_samples['handedness']}")
+    else:
+        print("  handedness: None")
 
     print("\nCommitted Decisions:")
     if not report["committed"]:

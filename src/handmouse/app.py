@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 import time
 import threading
+from types import SimpleNamespace
 from typing import Any
 
 from handmouse.camera import Camera
@@ -38,6 +40,7 @@ from handmouse.tracking.quality_gate import TrackingQualityGate
 from handmouse.policy.gesture_policy import GesturePolicy, GestureCandidate, GestureIntent, RiskClass
 from handmouse.actions.windows_backend import ActionRouter
 from handmouse.shortcut_detector import ShortcutAction
+from handmouse.types import FramePoint
 from handmouse.telemetry.schema import (
     build_frame_sample,
     build_gesture_candidate,
@@ -470,16 +473,17 @@ def _run_loop(
             frame_h = getattr(config.camera, "height", 480)
         quality = quality_gate.update(obs, frame_w, frame_h)
 
-        is_dragging = False
-        if getattr(gesture, "_left_state", GestureState.PINCH_OPEN) == GestureState.PINCH_HOLD or \
-           getattr(gesture, "_right_state", GestureState.PINCH_OPEN) == GestureState.PINCH_HOLD:
-            is_dragging = True
-            
-        effective_move_active = (is_active and move_mode_result.movement_enabled) or is_dragging
+        drag_runtime_active = bool(getattr(action_router, "_drag_active", False))
+        effective_move_active = (is_active and move_mode_result.movement_enabled) or drag_runtime_active
 
         try:
             if effective_move_active:
-                delta = pointer.update(hand_result, now_ms)
+                pointer_hand_result = (
+                    _mirror_hand_result_x(hand_result)
+                    if getattr(config.view, "render_mirrored", False)
+                    else hand_result
+                )
+                delta = pointer.update(pointer_hand_result, now_ms)
                 if delta is not None and (delta.dx != 0 or delta.dy != 0):
                     mouse.move_relative(delta)
                     dx = delta.dx
@@ -489,13 +493,32 @@ def _run_loop(
                 
             if is_active:
                 if alt_tab_detector is not None:
-                    candidates.extend(alt_tab_detector.update(hand_result.landmarks, now_ms))
+                    if clutch_snapshot.clutch_down or move_mode_result.movement_enabled:
+                        alt_tab_detector.reset()
+                    else:
+                        candidates.extend(alt_tab_detector.update(hand_result.landmarks, now_ms))
 
                 candidates.extend(grab_scroll.update(obs, now_ms))
                 candidates.extend(gesture.update(obs, now_ms))
                 
-                index_tip = hand_result.index_tip if hand_result else None
-                candidates.extend(shortcut_detector.update(obs, now_ms, index_tip, palm_open=palm_visible))
+                shortcut_blocked_by_move = (
+                    clutch_snapshot.clutch_down
+                    or move_mode_result.movement_enabled
+                    or drag_runtime_active
+                )
+                if shortcut_blocked_by_move:
+                    shortcut_detector.reset()
+                else:
+                    shortcut_point = _palm_center_point(hand_result.landmarks) if hand_result else None
+                    candidates.extend(
+                        shortcut_detector.update(
+                            obs,
+                            now_ms,
+                            shortcut_point,
+                            palm_open=palm_visible,
+                            generic_pose_active=move_pose,
+                        )
+                    )
             else:
                 if alt_tab_detector is not None:
                     alt_tab_detector.reset()
@@ -536,6 +559,12 @@ def _run_loop(
                         )
                 except Exception:
                     pass
+
+                if alt_tab_detector is not None and any(
+                    decision.action == "task_view" and not decision.committed
+                    for decision in decisions
+                ):
+                    alt_tab_detector.reset()
 
                 dispatches = action_router.dispatch(intents, {})
                 
@@ -601,6 +630,9 @@ def _run_loop(
                     hand_found=bool(hand_result and hand_result.landmarks),
                     landmarks=[[lm.x, lm.y, lm.z] for lm in obs.image_landmarks] if obs else [],
                     world_landmarks=[[lm.x, lm.y, lm.z] for lm in hand_result.world_landmarks] if (hand_result and hand_result.world_landmarks) else None,
+                    handedness_label=getattr(hand_result, "handedness_label", None),
+                    handedness_confidence=getattr(hand_result, "handedness_confidence", None),
+                    input_is_mirrored=config.camera.input_is_mirrored,
                     quality_score=quality.score,
                     quality_reasons=quality.reasons,
                 ),
@@ -721,25 +753,68 @@ def _is_palm_facing_camera(landmarks: list[Any] | None, handedness_label: str | 
         cross = v1_x * v2_y - v1_y * v2_x
 
         # In the Unified Physical Space (X increases physical right, Y increases physical down):
-        # Physical Left Hand, Palm Facing: Thumb is Right, Pinky is Left -> Index is Right(x>0), Pinky is Left(x<0)
-        # v1=(+x, -y), v2=(-x, -y) -> cross = (+)*(-) - (-)*(-) = (-) -> cross < 0
-        # Physical Right Hand, Palm Facing: Thumb is Left, Pinky is Right -> Index is Left(x<0), Pinky is Right(x>0)
-        # v1=(-x, -y), v2=(+x, -y) -> cross = (-)*(-) - (-)*(+) = (+) -> cross > 0
+        # In the mirrored runtime space, a palm-facing hand produces the opposite sign from
+        # the back-of-hand pose for the same physical hand:
+        # - Left hand, palm facing  -> cross > 0
+        # - Left hand, back facing  -> cross < 0
+        # - Right hand, palm facing -> cross < 0
+        # - Right hand, back facing -> cross > 0
         # Pass the metrics to some global debug state so we can render them on OSD
         debug_metrics = f"v1=({v1_x:.2f},{v1_y:.2f}) v2=({v2_x:.2f},{v2_y:.2f}) c={cross:.3f} L={is_left}"
         coordinate_mapper.DEBUG_CROSS = debug_metrics
 
         if is_left:
-            if cross >= 0:  # Back of left hand
+            if cross <= 0:  # Back of left hand
                 return False
         else:
-            if cross <= 0:  # Back of right hand
+            if cross >= 0:  # Back of right hand
                 return False
 
     # Without handedness_label we cannot distinguish palm from back-of-hand;
     # fall through to the sideways check only. Caller should treat falsy as
     # "unverified" rather than assuming palm-facing.
     return handedness_label is not None
+
+
+def _mirror_hand_result_x(hand_result: Any) -> Any:
+    if hand_result is None:
+        return None
+
+    landmarks = getattr(hand_result, "landmarks", None)
+    if not landmarks:
+        return hand_result
+
+    mirrored_landmarks = [FramePoint(1.0 - lm.x, lm.y) for lm in landmarks]
+    thumb_tip = getattr(hand_result, "thumb_tip", None)
+    index_tip = getattr(hand_result, "index_tip", None)
+    mirrored_thumb_tip = FramePoint(1.0 - thumb_tip.x, thumb_tip.y) if thumb_tip is not None else None
+    mirrored_index_tip = FramePoint(1.0 - index_tip.x, index_tip.y) if index_tip is not None else None
+
+    if hasattr(hand_result, "__dataclass_fields__"):
+        return replace(
+            hand_result,
+            landmarks=mirrored_landmarks,
+            thumb_tip=mirrored_thumb_tip,
+            index_tip=mirrored_index_tip,
+        )
+
+    return SimpleNamespace(
+        **getattr(hand_result, "__dict__", {}),
+        landmarks=mirrored_landmarks,
+        thumb_tip=mirrored_thumb_tip,
+        index_tip=mirrored_index_tip,
+    )
+
+
+def _palm_center_point(landmarks: list[Any] | None) -> FramePoint | None:
+    if not landmarks or len(landmarks) < 18:
+        return None
+
+    palm_indices = (0, 5, 9, 13, 17)
+    return FramePoint(
+        sum(landmarks[i].x for i in palm_indices) / len(palm_indices),
+        sum(landmarks[i].y for i in palm_indices) / len(palm_indices),
+    )
 
 
 def _is_finger_curled(landmarks: list[Any] | None, mcp_idx: int, tip_idx: int) -> bool:
