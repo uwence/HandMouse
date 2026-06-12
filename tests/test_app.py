@@ -6,9 +6,11 @@ from types import SimpleNamespace
 import pytest
 
 import handmouse.app as app_module
+import handmouse.config as config_module
 import handmouse.coordinate_mapper as coordinate_mapper
 from handmouse.app import _is_palm_facing_camera, _mirror_frame, _run_loop
 from handmouse.clutch_input import ClutchSnapshot
+from handmouse.config import PolicyConfig
 from handmouse.hand_tracker import HandTrackingResult
 from handmouse.mouse_controller import MouseFailsafeTriggered
 from handmouse.interlock import InteractionInterlock
@@ -221,6 +223,42 @@ class FakeActionRouter:
         self.calls.append(intents)
         assert self.results, "no dispatch results left"
         return self.results.pop(0)
+
+
+class FakePolicy:
+    def __init__(self, *, high_risk_cooldown_ms: int = 0, explicit_confirm_required: bool = False) -> None:
+        self.high_risk_cooldown_ms = high_risk_cooldown_ms
+        self.explicit_confirm_required = explicit_confirm_required
+
+    def evaluate(self, obs: object, quality: object, candidates: list[object], session_state: dict[str, object]) -> list[object]:
+        return []
+
+
+class FakeBuffer:
+    def __init__(self, item: tuple[object, object, int]) -> None:
+        self.item = item
+        self._first = True
+
+    def wait_new_result(self, timeout: float) -> bool:
+        if self._first:
+            self._first = False
+            return True
+        return False
+
+    def clear(self) -> None:
+        return None
+
+    def get(self) -> tuple[object, object, int]:
+        return self.item
+
+
+class FakeInferenceWorker:
+    def __init__(self, item: tuple[object, object, int]) -> None:
+        self.buffer = FakeBuffer(item)
+
+
+class FakeCameraReader:
+    pass
 
 
 def make_hand_result(*, index_tip: FramePoint | None, landmarks: list[FramePoint] | None = None) -> object:
@@ -617,6 +655,89 @@ def test_run_loop_resets_dispatches_when_next_frame_has_no_candidates() -> None:
     assert len(debug_view.telemetries) >= 2
     assert debug_view.telemetries[0].dispatches
     assert debug_view.telemetries[1].dispatches == []
+
+
+def test_run_loop_syncs_policy_settings_from_active_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cv2 = FakeCv2(wait_keys=[0, ord("q")])
+    original_config = config_module.ACTIVE_CONFIG
+    monkeypatch.setattr(
+        config_module,
+        "ACTIVE_CONFIG",
+        original_config.__class__(
+            camera=original_config.camera,
+            pointer=original_config.pointer,
+            shortcut=original_config.shortcut,
+            clutch=original_config.clutch,
+            schema_version=original_config.schema_version,
+            policy=PolicyConfig(high_risk_cooldown_ms=321, explicit_confirm_required=True),
+            gesture_switches=original_config.gesture_switches,
+            gesture_config=original_config.gesture_config,
+            grab_scroll_config=original_config.grab_scroll_config,
+            view=original_config.view,
+            show_osd=original_config.show_osd,
+        ),
+    )
+    policy = FakePolicy(high_risk_cooldown_ms=0, explicit_confirm_required=False)
+
+    _run_loop(
+        cv2=cv2,
+        camera=FakeCamera(frames=[object(), object()]),
+        tracker=FakeTracker([make_hand_result(index_tip=None, landmarks=[])] * 2),
+        pointer=FakePointer(updates=[]),
+        gesture=FakeGesture([[], []]),
+        grab_scroll=FakeGrabScroll([[], []]),
+        shortcut_detector=FakeShortcutDetector([[], []]),
+        engagement=FakeEngagement(
+            [
+                make_engagement_result(active=False, state="IDLE"),
+                make_engagement_result(active=False, state="IDLE", reason="escape"),
+            ]
+        ),
+        mouse=FakeMouse(),
+        shortcut=FakeShortcutController(),
+        debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
+        policy=policy,
+    )
+
+    assert policy.high_risk_cooldown_ms == 321
+    assert policy.explicit_confirm_required is True
+
+
+def test_run_loop_unifies_threaded_result_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cv2 = FakeCv2(wait_keys=[0, ord("q")])
+    frame = SimpleNamespace(shape=(480, 640, 3))
+    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=[])
+    unify_calls: list[tuple[object, bool]] = []
+
+    monkeypatch.setattr(
+        coordinate_mapper,
+        "unify_hand_result",
+        lambda raw_result, input_is_mirrored: unify_calls.append((raw_result, input_is_mirrored)) or raw_result,
+    )
+
+    _run_loop(
+        cv2=cv2,
+        camera=FakeCamera(frames=[]),
+        tracker=FakeTracker([]),
+        pointer=FakePointer(updates=[]),
+        gesture=FakeGesture([[]]),
+        grab_scroll=FakeGrabScroll([[]]),
+        shortcut_detector=FakeShortcutDetector([[]]),
+        engagement=FakeEngagement([make_engagement_result(active=False, state="IDLE")]),
+        mouse=FakeMouse(),
+        shortcut=FakeShortcutController(),
+        debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
+        camera_reader=FakeCameraReader(),
+        inference_worker=FakeInferenceWorker((hand_result, frame, 1000)),
+    )
+
+    assert len(unify_calls) == 1
 
 
 def test_build_frame_sample_schema_contains_world_z_and_quality() -> None:

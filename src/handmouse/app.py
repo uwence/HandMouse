@@ -309,8 +309,6 @@ def _run_loop(
                 continue
 
             raw_hand_result = hand_result
-            hand_result = coordinate_mapper.unify_hand_result(raw_hand_result, conf.ACTIVE_CONFIG.camera.input_is_mirrored)
-
             now = time.perf_counter()
             frame_capture_time = now_ms / 1000.0
             frame_age_ms = int((now - frame_capture_time) * 1000)
@@ -437,6 +435,9 @@ def _run_loop(
                 config.policy.high_risk_cooldown_ms,
                 explicit_confirm_required=config.policy.explicit_confirm_required,
             )
+        else:
+            policy.high_risk_cooldown_ms = config.policy.high_risk_cooldown_ms
+            policy.explicit_confirm_required = config.policy.explicit_confirm_required
         if action_router is None:
             action_router = ActionRouter(mouse, shortcut)
 
