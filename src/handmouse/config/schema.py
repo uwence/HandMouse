@@ -4,7 +4,7 @@ from typing import Any
 from handmouse.config import (
     CameraConfig, ViewConfig, ControlRegion, PointerConfig,
     ShortcutConfig, ClutchConfig, GestureSwitches,
-    ExtendedGestureConfig, ExtendedGrabScrollConfig, PolicyConfig, AppConfig,
+    ExtendedGestureConfig, ExtendedGrabScrollConfig, PolicyConfig, BimanualConfig, AppConfig,
     SUPPORTED_BACKENDS
 )
 
@@ -102,6 +102,17 @@ def dict_to_app_config(d: dict) -> AppConfig:
         explicit_confirm_required=bool(policy_d.get("explicit_confirm_required", True)),
     )
 
+    bm_d = d.get("bimanual", {})
+    bimanual = BimanualConfig(
+        enabled=bool(bm_d.get("enabled", False)),
+        dominant_hand=str(bm_d.get("dominant_hand", "right")),
+        open_hold_ms=int(bm_d.get("open_hold_ms", 250)),
+        open_stable_frames=int(bm_d.get("open_stable_frames", 4)),
+        suspend_grace_ms=int(bm_d.get("suspend_grace_ms", 150)),
+        idle_grace_ms=int(bm_d.get("idle_grace_ms", 500)),
+        identity_grace_ms=int(bm_d.get("identity_grace_ms", 500)),
+    )
+
     return AppConfig(
         camera=camera,
         pointer=pointer,
@@ -114,4 +125,5 @@ def dict_to_app_config(d: dict) -> AppConfig:
         grab_scroll_config=grab_scroll_config,
         view=view,
         show_osd=d.get("show_osd", True),
+        bimanual=bimanual,
     )
