@@ -5,7 +5,7 @@ import time
 from typing import Any, Tuple
 
 from handmouse.camera import Camera
-from handmouse.hand_tracker import HandTracker, HandTrackingResult
+from handmouse.hand_tracker import HandTracker, HandTrackingResult, MultiHandTrackingResult
 
 
 class FrameBuffer:
@@ -35,19 +35,19 @@ class FrameBuffer:
 class ResultBuffer:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._result = None
+        self._result: MultiHandTrackingResult | None = None
         self._frame = None
         self._timestamp_ms = 0
         self._new_result_event = threading.Event()
 
-    def set(self, result: HandTrackingResult, frame: Any, timestamp_ms: int) -> None:
+    def set(self, result: MultiHandTrackingResult, frame: Any, timestamp_ms: int) -> None:
         with self._lock:
             self._result = result
             self._frame = frame
             self._timestamp_ms = timestamp_ms
         self._new_result_event.set()
 
-    def get(self) -> Tuple[HandTrackingResult | None, Any, int]:
+    def get(self) -> tuple[MultiHandTrackingResult | None, Any, int]:
         with self._lock:
             return self._result, self._frame, self._timestamp_ms
 
@@ -108,7 +108,7 @@ class InferenceWorker(threading.Thread):
             if hasattr(self.tracker, "register_callback"):
                 self.tracker.register_callback(self._on_async_result)
 
-    def _on_async_result(self, result: Any, output_image: Any, timestamp_ms: int) -> None:
+    def _on_async_result(self, result: MultiHandTrackingResult, output_image: Any, timestamp_ms: int) -> None:
         with self._frame_lock:
             frame = self._frame_cache.pop(timestamp_ms, None)
             
