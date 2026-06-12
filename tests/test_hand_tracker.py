@@ -153,13 +153,15 @@ def test_video_mode_processes_valid_frame(monkeypatch: pytest.MonkeyPatch) -> No
     assert tracker._landmarker is landmarker
     assert tracker._landmarker.result is result
 
-    assert output.handedness_label == "Right"
-    assert output.handedness_confidence == pytest.approx(0.91)
-    assert output.thumb_tip == output.landmarks[4]
-    assert output.index_tip == output.landmarks[8]
-    assert output.landmarks[4].x == pytest.approx(0.4)
-    assert output.landmarks[4].y == pytest.approx(0.2)
-    assert output.raw_landmarks is result.hand_landmarks[0]
+    first = output.first
+    assert first is not None
+    assert first.handedness_label == "Right"
+    assert first.handedness_confidence == pytest.approx(0.91)
+    assert first.thumb_tip == first.landmarks[4]
+    assert first.index_tip == first.landmarks[8]
+    assert first.landmarks[4].x == pytest.approx(0.4)
+    assert first.landmarks[4].y == pytest.approx(0.2)
+    assert first.raw_landmarks is result.hand_landmarks[0]
 
 
 def test_video_mode_returns_empty_when_no_hand(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -175,13 +177,8 @@ def test_video_mode_returns_empty_when_no_hand(monkeypatch: pytest.MonkeyPatch) 
     assert landmarker.calls[0][1] == 42
     assert landmarker.calls[0][0].image_format == fake_mp.mp.ImageFormat.SRGB
     assert landmarker.calls[0][0].data == ["rgb", [[9, 9]]]
-    assert output.landmarks == []
-    assert output.thumb_tip is None
-    assert output.index_tip is None
-    assert output.raw_landmarks is None
-    assert output.world_landmarks is None
-    assert output.handedness_label is None
-    assert output.handedness_confidence is None
+    assert output.first is None
+    assert output.hands == []
 
 
 def test_video_mode_timestamp_monotonic_passes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -256,9 +253,11 @@ def test_live_stream_mode_async_processing(monkeypatch: pytest.MonkeyPatch) -> N
     assert len(received_results) == 1
     converted_result, ts = received_results[0]
     assert ts == 999
-    assert converted_result.handedness_label == "Left"
-    assert converted_result.handedness_confidence == pytest.approx(0.88)
-    assert len(converted_result.landmarks) == 21
+    first = converted_result.first
+    assert first is not None
+    assert first.handedness_label == "Left"
+    assert first.handedness_confidence == pytest.approx(0.88)
+    assert len(first.landmarks) == 21
 
 
 def test_convert_result_preserves_image_and_world_z(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -274,7 +273,9 @@ def test_convert_result_preserves_image_and_world_z(monkeypatch: pytest.MonkeyPa
     tracker = HandTracker(model_path="/tmp/hand_landmarker.task")
     output = tracker.process([[1, 2], [3, 4]], 12345)
 
-    assert output.raw_landmarks[0].z == pytest.approx(0.0)
-    assert output.raw_landmarks[8].z == pytest.approx(-0.24)
-    assert output.world_landmarks is not None
-    assert output.world_landmarks[8].z == pytest.approx(8 / 300.0)
+    first = output.first
+    assert first is not None
+    assert first.raw_landmarks[0].z == pytest.approx(0.0)
+    assert first.raw_landmarks[8].z == pytest.approx(-0.24)
+    assert first.world_landmarks is not None
+    assert first.world_landmarks[8].z == pytest.approx(8 / 300.0)
