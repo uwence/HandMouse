@@ -45,6 +45,36 @@ def _fist_landmarks() -> list[Point3]:
     return lm
 
 
+def _palm_open_only_2_extended_landmarks() -> list[Point3]:
+    """Only 2 fingertips extended, 2 curled (below MIN_FINGERS=3 threshold)."""
+    lm = list(_flat_landmarks())
+    lm[0] = Point3(0.5, 0.8, 0.0)   # wrist
+    for i in (5, 9, 13, 17):
+        lm[i] = Point3(0.5, 0.6, 0.0)  # MCPs
+    # Only 2 fingertips extended (indices 8 and 12)
+    lm[8] = Point3(0.5, 0.1, 0.0)
+    lm[12] = Point3(0.5, 0.1, 0.0)
+    # Other 2 fingertips curled (indices 16 and 20)
+    lm[16] = Point3(0.5, 0.65, 0.0)
+    lm[20] = Point3(0.5, 0.65, 0.0)
+    return lm
+
+
+def _fist_only_2_curled_landmarks() -> list[Point3]:
+    """Only 2 fingertips curled, 2 extended (below MIN_FINGERS=3 threshold)."""
+    lm = list(_flat_landmarks())
+    lm[0] = Point3(0.5, 0.8, 0.0)   # wrist
+    for i in (5, 9, 13, 17):
+        lm[i] = Point3(0.5, 0.6, 0.0)  # MCPs
+    # Only 2 fingertips curled (indices 8 and 12)
+    lm[8] = Point3(0.5, 0.65, 0.0)
+    lm[12] = Point3(0.5, 0.65, 0.0)
+    # Other 2 fingertips extended (indices 16 and 20)
+    lm[16] = Point3(0.5, 0.1, 0.0)
+    lm[20] = Point3(0.5, 0.1, 0.0)
+    return lm
+
+
 def test_palm_open_returns_true_for_extended_fingers():
     obs = _obs(_palm_open_landmarks())
     assert PoseDetector.is_palm_open(obs) is True
@@ -67,5 +97,21 @@ def test_fist_returns_false_for_open_palm():
 
 def test_returns_false_for_insufficient_landmarks():
     obs = _obs([Point3(0.5, 0.5, 0.0)] * 5)
+    assert PoseDetector.is_palm_open(obs) is False
+    assert PoseDetector.is_fist(obs) is False
+
+
+def test_palm_open_false_with_only_2_extended():
+    obs = _obs(_palm_open_only_2_extended_landmarks())
+    assert PoseDetector.is_palm_open(obs) is False
+
+
+def test_fist_false_with_only_2_curled():
+    obs = _obs(_fist_only_2_curled_landmarks())
+    assert PoseDetector.is_fist(obs) is False
+
+
+def test_empty_landmark_list():
+    obs = _obs([])
     assert PoseDetector.is_palm_open(obs) is False
     assert PoseDetector.is_fist(obs) is False
