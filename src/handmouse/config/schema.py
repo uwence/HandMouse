@@ -103,14 +103,32 @@ def dict_to_app_config(d: dict) -> AppConfig:
     )
 
     bm_d = d.get("bimanual", {})
+    dominant_hand = str(bm_d.get("dominant_hand", "right"))
+    if dominant_hand not in ("left", "right"):
+        raise ValueError(f"bimanual.dominant_hand must be 'left' or 'right', got: {dominant_hand!r}")
+    open_hold_ms = int(bm_d.get("open_hold_ms", 250))
+    open_stable_frames = int(bm_d.get("open_stable_frames", 4))
+    suspend_grace_ms = int(bm_d.get("suspend_grace_ms", 150))
+    idle_grace_ms = int(bm_d.get("idle_grace_ms", 500))
+    identity_grace_ms = int(bm_d.get("identity_grace_ms", 500))
+    if open_hold_ms < 0:
+        raise ValueError(f"bimanual.open_hold_ms must be >= 0, got: {open_hold_ms}")
+    if open_stable_frames < 1:
+        raise ValueError(f"bimanual.open_stable_frames must be >= 1, got: {open_stable_frames}")
+    if suspend_grace_ms < 0:
+        raise ValueError(f"bimanual.suspend_grace_ms must be >= 0, got: {suspend_grace_ms}")
+    if idle_grace_ms < 0:
+        raise ValueError(f"bimanual.idle_grace_ms must be >= 0, got: {idle_grace_ms}")
+    if identity_grace_ms < 0:
+        raise ValueError(f"bimanual.identity_grace_ms must be >= 0, got: {identity_grace_ms}")
     bimanual = BimanualConfig(
         enabled=bool(bm_d.get("enabled", False)),
-        dominant_hand=str(bm_d.get("dominant_hand", "right")),
-        open_hold_ms=int(bm_d.get("open_hold_ms", 250)),
-        open_stable_frames=int(bm_d.get("open_stable_frames", 4)),
-        suspend_grace_ms=int(bm_d.get("suspend_grace_ms", 150)),
-        idle_grace_ms=int(bm_d.get("idle_grace_ms", 500)),
-        identity_grace_ms=int(bm_d.get("identity_grace_ms", 500)),
+        dominant_hand=dominant_hand,
+        open_hold_ms=open_hold_ms,
+        open_stable_frames=open_stable_frames,
+        suspend_grace_ms=suspend_grace_ms,
+        idle_grace_ms=idle_grace_ms,
+        identity_grace_ms=identity_grace_ms,
     )
 
     return AppConfig(
