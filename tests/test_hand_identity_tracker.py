@@ -79,6 +79,28 @@ def test_confidence_above_threshold_is_kept():
     assert result.right_obs is not None
 
 
+def test_presence_flag_false_during_grace_period():
+    """Cached hands held by grace_ms must be flagged as not present this frame.
+
+    Without this distinction, the bimanual gate would never start its
+    suspend/idle timers when the mode hand disappears (see PR #1 review).
+    """
+    tracker = HandIdentityTracker(grace_ms=500)
+    tracker.update(_multi("Left", "Right"), now_ms=0, frame_age_ms=5)
+    # Left disappears but is still within grace
+    result = tracker.update(_multi("Right"), now_ms=200, frame_age_ms=5)
+    assert result.left_obs is not None       # cached value still readable
+    assert result.left_present is False      # but NOT present this frame
+    assert result.right_present is True
+
+
+def test_presence_flag_true_when_seen():
+    tracker = HandIdentityTracker(grace_ms=500)
+    result = tracker.update(_multi("Left", "Right"), now_ms=0, frame_age_ms=5)
+    assert result.left_present is True
+    assert result.right_present is True
+
+
 def test_low_confidence_does_not_overwrite_tracked_hand():
     """Once a hand is tracked, a low-confidence frame is ignored (grace covers it)."""
     tracker = HandIdentityTracker(grace_ms=500, min_confidence=0.75)

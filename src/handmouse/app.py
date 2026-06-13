@@ -504,23 +504,35 @@ def _run_loop(
         mode_obs_bm = None
         ptr_obs_bm = None
         ptr_result_bm = None
+        mode_present_now = False
+        ptr_present_now = False
 
         if bimanual_cfg.enabled and identity_tracker is not None and bimanual_gate is not None:
             identified = identity_tracker.update(unified_multi, now_ms, frame_age_ms)
             mode_label = "Left" if bimanual_cfg.dominant_hand == "right" else "Right"
             if mode_label == "Left":
                 mode_obs_bm = identified.left_obs
+                mode_present_now = identified.left_present
                 ptr_obs_bm = identified.right_obs
                 ptr_result_bm = identified.right_result
                 ptr_stable_frames = identified.right_stable_frames
+                ptr_present_now = identified.right_present
             else:
                 mode_obs_bm = identified.right_obs
+                mode_present_now = identified.right_present
                 ptr_obs_bm = identified.left_obs
                 ptr_result_bm = identified.left_result
                 ptr_stable_frames = identified.left_stable_frames
-            pointer_stable = ptr_stable_frames >= bimanual_cfg.pointer_stable_frames
+                ptr_present_now = identified.left_present
+            pointer_stable = ptr_present_now and ptr_stable_frames >= bimanual_cfg.pointer_stable_frames
+            # Only feed the gate a mode observation when the mode hand was
+            # actually seen this frame. Cached obs from the identity grace
+            # period would otherwise keep refreshing _mode_last_seen_ms and
+            # prevent the gate's suspend/idle timers from ever firing.
+            gate_mode_obs = mode_obs_bm if mode_present_now else None
+            gate_ptr_obs = ptr_obs_bm if ptr_present_now else None
             gate_result = bimanual_gate.update(
-                mode_obs_bm, ptr_obs_bm, now_ms, pointer_stable=pointer_stable
+                gate_mode_obs, gate_ptr_obs, now_ms, pointer_stable=pointer_stable
             )
 
         drag_runtime_active = bool(getattr(action_router, "_drag_active", False))
@@ -531,6 +543,7 @@ def _run_loop(
             and gate_result is not None
             and gate_result.gate_active
             and ptr_result_bm is not None
+            and ptr_present_now
             and is_active
             and quality.ok
         )
@@ -574,7 +587,13 @@ def _run_loop(
                         alt_tab_detector.reset()
                     grab_scroll.reset()
                     shortcut_detector.reset()
-                    if gate_result is not None and gate_result.gate_active and ptr_obs_bm is not None and quality.ok:
+                    if (
+                        gate_result is not None
+                        and gate_result.gate_active
+                        and ptr_obs_bm is not None
+                        and ptr_present_now
+                        and quality.ok
+                    ):
                         candidates.extend(gesture.update(
                             ptr_obs_bm,
                             now_ms,

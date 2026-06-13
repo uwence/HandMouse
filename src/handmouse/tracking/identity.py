@@ -26,6 +26,13 @@ class IdentifiedHands:
     right_obs: HandObservation | None
     left_stable_frames: int
     right_stable_frames: int
+    # True iff the hand was observed THIS frame. False means the data is
+    # either absent or cached from an earlier frame within grace_ms. The
+    # bimanual gate uses this to decide if the mode hand is genuinely
+    # present, so that suspend/idle grace timers actually fire when the
+    # hand disappears.
+    left_present: bool = False
+    right_present: bool = False
 
 
 def _result_to_obs(
@@ -76,8 +83,10 @@ class HandIdentityTracker:
             obs = _result_to_obs(h, now_ms, frame_age_ms)
             seen[h.handedness_label] = (h, obs)
 
-        self._left = self._merge("Left", self._left, seen.get("Left"), now_ms)
-        self._right = self._merge("Right", self._right, seen.get("Right"), now_ms)
+        left_seen = seen.get("Left")
+        right_seen = seen.get("Right")
+        self._left = self._merge("Left", self._left, left_seen, now_ms)
+        self._right = self._merge("Right", self._right, right_seen, now_ms)
 
         return IdentifiedHands(
             left_result=self._left.result if self._left else None,
@@ -86,6 +95,8 @@ class HandIdentityTracker:
             right_obs=self._right.obs if self._right else None,
             left_stable_frames=self._left.stable_frames if self._left else 0,
             right_stable_frames=self._right.stable_frames if self._right else 0,
+            left_present=left_seen is not None,
+            right_present=right_seen is not None,
         )
 
     def reset(self) -> None:
