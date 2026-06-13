@@ -363,8 +363,7 @@ def _run_loop(
             raw_landmarks=None, world_landmarks=None,
             handedness_label=None, handedness_confidence=None,
         )
-        from handmouse.coordinate_mapper import unify_multi_hand_result as _umhr
-        unified_multi = _umhr(multi_result, conf.ACTIVE_CONFIG.camera.input_is_mirrored)
+        unified_multi = None  # computed lazily in the bimanual branch to avoid redundant unify_hand_result calls
         
         # Update calibration state if active
         try:
@@ -508,6 +507,8 @@ def _run_loop(
         ptr_present_now = False
 
         if bimanual_cfg.enabled and identity_tracker is not None and bimanual_gate is not None:
+            from handmouse.coordinate_mapper import unify_multi_hand_result as _umhr
+            unified_multi = _umhr(multi_result, conf.ACTIVE_CONFIG.camera.input_is_mirrored)
             identified = identity_tracker.update(unified_multi, now_ms, frame_age_ms)
             mode_label = "Left" if bimanual_cfg.dominant_hand == "right" else "Right"
             if mode_label == "Left":

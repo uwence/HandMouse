@@ -51,13 +51,25 @@ class FakeCamera:
         return True, self.frames.pop(0)
 
 
+def _wrap_multi(hand_result: object) -> object:
+    """Wrap a single hand_result into the MultiHandTrackingResult shape expected by app.py.
+
+    app._run_loop reads `multi_result.first` and `coordinate_mapper.unify_multi_hand_result`
+    iterates `multi.hands`. Tests previously returned a single hand directly — we wrap
+    it here so the legacy fakes keep working with the bimanual-aware app.
+    """
+    if hand_result is None:
+        return SimpleNamespace(first=None, hands=[])
+    return SimpleNamespace(first=hand_result, hands=[hand_result])
+
+
 class FakeTracker:
     def __init__(self, results: list[object]) -> None:
         self.results = list(results)
 
     def process(self, frame: object, frame_timestamp_ms: int | None = None) -> object:
         assert self.results, "no tracker results left"
-        return self.results.pop(0)
+        return _wrap_multi(self.results.pop(0))
 
 
 class FakePointer:
@@ -279,7 +291,9 @@ class FakeBuffer:
 
 class FakeInferenceWorker:
     def __init__(self, item: tuple[object, object, int]) -> None:
-        self.buffer = FakeBuffer(item)
+        hand_result, frame, ts = item
+        wrapped = (_wrap_multi(hand_result), frame, ts)
+        self.buffer = FakeBuffer(wrapped)
 
 
 class FakeCameraReader:
