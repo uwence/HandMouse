@@ -50,7 +50,7 @@ class GestureDetector:
 
         self._pointer_freeze = False
 
-    def update(self, obs: HandObservation | None, now_ms: int, mode_is_secondary: bool = False) -> list[GestureCandidate]:
+    def update(self, obs: HandObservation | None, now_ms: int) -> list[GestureCandidate]:
         if obs is None or not obs.image_landmarks or len(obs.image_landmarks) < 21:
             self.reset()
             return []
@@ -149,21 +149,18 @@ class GestureDetector:
                                 GestureCandidate("pinch", "drag_release", "fire", 1.0, RiskClass.MEDIUM, True)
                             )
                         if self.config.emit_on_release and not was_dragging:
-                            # Right-click modifier takes precedence over the double-click window
-                            if mode_is_secondary:
-                                candidates.append(GestureCandidate("pinch", "click_right", "fire", 1.0, RiskClass.MEDIUM, True))
-                                self._last_left_click_ms = 0
-                            elif self._last_left_click_ms > 0 and now_ms - self._last_left_click_ms < 300:
+                            if self._last_left_click_ms > 0 and now_ms - self._last_left_click_ms < 300:
                                 candidates.append(GestureCandidate("pinch", "double_click", "fire", 1.0, RiskClass.MEDIUM, True))
                                 self._last_left_click_ms = 0
                             else:
                                 candidates.append(GestureCandidate("pinch", "click_left", "fire", 1.0, RiskClass.MEDIUM, True))
                                 self._last_left_click_ms = now_ms
 
-        # 2. Update Right State Machine — disabled in bimanual_mode
-        if self.config.bimanual_mode:
-            pass
-        elif self._left_state != GestureState.PINCH_OPEN:
+        # 2. Update Right State Machine (thumb-middle pinch = right click).
+        # Runs in both single-hand and bimanual mode: in bimanual the pointer
+        # hand's thumb-middle pinch is how right-click is produced (the left
+        # fist is now the pointer-lock, not a right-click modifier).
+        if self._left_state != GestureState.PINCH_OPEN:
             self._right_state = GestureState.PINCH_OPEN
             self._right_close_count = 0
             self._right_release_count = 0
@@ -218,14 +215,11 @@ class GestureDetector:
         )
         if left_engaged and not self._left_dragging:
             return True
-        if not self.config.bimanual_mode:
-            right_engaged = (
-                right_ratio < self.config.pinch_freeze_ratio
-                or self._right_state != GestureState.PINCH_OPEN
-            )
-            if right_engaged:
-                return True
-        return False
+        right_engaged = (
+            right_ratio < self.config.pinch_freeze_ratio
+            or self._right_state != GestureState.PINCH_OPEN
+        )
+        return right_engaged
 
     def reset(self) -> None:
         self._left_state = GestureState.PINCH_OPEN

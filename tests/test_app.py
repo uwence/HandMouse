@@ -98,7 +98,7 @@ class FakeGesture:
         self.calls: list[tuple[object, object, int]] = []
         self.pointer_freeze_active = False
 
-    def update(self, obs, now_ms: int, mode_is_secondary: bool = False) -> object:
+    def update(self, obs, now_ms: int) -> object:
         self.calls.append((obs, now_ms))
         assert self.results, "no gesture results left"
         return self.results.pop(0)
@@ -1101,8 +1101,9 @@ class _FakeIdentityTracker:
 class _FakeBimanualGate:
     """Always reports gate_active=True so safety gates upstream are the only thing stopping movement."""
 
-    def __init__(self) -> None:
+    def __init__(self, pointer_frozen: bool = False) -> None:
         self.calls: list[tuple] = []
+        self.pointer_frozen = pointer_frozen
 
     def update(self, mode_obs, pointer_obs, now_ms, pointer_stable=True):
         from handmouse.bimanual_gate import BimanualGateResult, BimanualGateState
@@ -1110,7 +1111,7 @@ class _FakeBimanualGate:
         return BimanualGateResult(
             state=BimanualGateState.ACTIVE,
             gate_active=True,
-            mode_is_secondary=False,
+            pointer_frozen=self.pointer_frozen,
         )
 
 
@@ -1187,6 +1188,20 @@ def test_bimanual_moves_pointer_when_not_frozen(
     kwargs["gesture"].pointer_freeze_active = False
     _run_loop(**kwargs)
     assert mouse.moves != [], "pointer must move when active, quality ok, and not frozen"
+
+
+def test_bimanual_pointer_lock_freezes_cursor_but_allows_clicks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Left-fist pointer lock (pointer_frozen=True): cursor must not move even
+    though the pointer engine produced a nonzero delta and all other gates pass,
+    but the gesture detector must still run so clicks fire at the locked spot."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    kwargs["bimanual_gate"] = _FakeBimanualGate(pointer_frozen=True)
+    gesture = kwargs["gesture"]
+    _run_loop(**kwargs)
+    assert mouse.moves == [], "left-fist pointer lock must freeze the cursor"
+    assert gesture.calls, "gesture detector must still run while locked so clicks work"
 
 
 def test_build_frame_sample_schema_contains_world_z_and_quality() -> None:

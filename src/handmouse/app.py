@@ -53,6 +53,11 @@ WINDOW_NAME = "HandMouse"
 PENDING_STATE_TOGGLE = False
 SHOULD_EXIT = False
 
+# Auto pinch-freeze (P0) is suppressed above this pointer velocity (palm-widths/s):
+# a fast cursor sweep keeps moving even if the pinch ratio dips, so the cursor
+# never stutters mid-motion; the freeze only engages while settling onto a target.
+AUTO_FREEZE_VELOCITY_MAX = 1.0
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=WINDOW_NAME)
     parser.add_argument("--record-telemetry", type=str, default=None, help="Path to dump frame telemetry JSONL")
@@ -560,6 +565,7 @@ def _run_loop(
             bimanual_cfg.enabled
             and gate_result is not None
             and gate_result.gate_active
+            and not gate_result.pointer_frozen
             and ptr_result_bm is not None
             and ptr_present_now
             and is_active
@@ -575,7 +581,11 @@ def _run_loop(
                         else ptr_result_bm
                     )
                     delta = pointer.update(ptr_for_engine, now_ms)
-                    if delta is not None and (delta.dx != 0 or delta.dy != 0) and not gesture.pointer_freeze_active:
+                    # Auto pinch-freeze (P0) only when the hand is settling/aiming
+                    # (velocity below AUTO_FREEZE_VELOCITY_MAX). A fast cursor sweep
+                    # keeps moving even if the pinch ratio dips, so we don't stutter.
+                    auto_freeze = gesture.pointer_freeze_active and (pointer.last_velocity or 0.0) < AUTO_FREEZE_VELOCITY_MAX
+                    if delta is not None and (delta.dx != 0 or delta.dy != 0) and not auto_freeze:
                         mouse.move_relative(delta)
                         dx = delta.dx
                         dy = delta.dy
@@ -588,7 +598,8 @@ def _run_loop(
                     else hand_result
                 )
                 delta = pointer.update(pointer_hand_result, now_ms)
-                if delta is not None and (delta.dx != 0 or delta.dy != 0) and not gesture.pointer_freeze_active:
+                auto_freeze = gesture.pointer_freeze_active and (pointer.last_velocity or 0.0) < AUTO_FREEZE_VELOCITY_MAX
+                if delta is not None and (delta.dx != 0 or delta.dy != 0) and not auto_freeze:
                     mouse.move_relative(delta)
                     dx = delta.dx
                     dy = delta.dy
@@ -612,11 +623,7 @@ def _run_loop(
                         and ptr_present_now
                         and quality.ok
                     ):
-                        candidates.extend(gesture.update(
-                            ptr_obs_bm,
-                            now_ms,
-                            mode_is_secondary=gate_result.mode_is_secondary,
-                        ))
+                        candidates.extend(gesture.update(ptr_obs_bm, now_ms))
                     else:
                         gesture.reset()
                 else:
