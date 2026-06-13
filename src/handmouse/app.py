@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import replace
 import json
 import time
@@ -10,6 +11,7 @@ from typing import Any
 
 from handmouse.camera import Camera
 from handmouse.clutch_input import ClutchSnapshot, GlobalClutchInput
+from handmouse.physical_input_monitor import PhysicalInputMonitor
 from handmouse.config import DEFAULT_CONFIG, load_or_create_config
 from handmouse.debug_view import DebugTelemetry, DebugView
 from handmouse.engagement import EngagementConfig, EngagementFSM
@@ -53,6 +55,16 @@ WINDOW_NAME = "HandMouse"
 PENDING_STATE_TOGGLE = False
 SHOULD_EXIT = False
 
+# Auto pinch-freeze (P0) is suppressed above this pointer velocity (palm-widths/s):
+# a fast cursor sweep keeps moving even if the pinch ratio dips, so the cursor
+# never stutters mid-motion; the freeze only engages while settling onto a target.
+AUTO_FREEZE_VELOCITY_MAX = 1.0
+
+# Suspend gesture control for this long after any *physical* mouse/keyboard input,
+# so a hand resting on the real mouse (visible to the webcam) does not fight the
+# user driving manually. HandMouse's own injected events are excluded.
+PHYSICAL_INPUT_GRACE_MS = 800
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=WINDOW_NAME)
     parser.add_argument("--record-telemetry", type=str, default=None, help="Path to dump frame telemetry JSONL")
@@ -72,6 +84,7 @@ def main() -> None:
     mouse = MouseController()
     shortcut = ShortcutController()
     clutch_input = GlobalClutchInput(config.clutch.key_name)
+    physical_input_monitor = PhysicalInputMonitor(monitor_mouse=True, monitor_keyboard=False)
 
     try:
         camera.open()
@@ -140,12 +153,37 @@ def main() -> None:
         from handmouse.osd import OSDManager
         osd = OSDManager(enabled=config.show_osd)
         
-        try:
-            clutch_input.start()
-            clutch_status = "OK"
-        except Exception as exc:
-            clutch_status = "FAILED"
-            print(f"WARNING: Global clutch input listener failed to start: {exc}")
+        # Diagnostic isolation toggles (env vars): disable always-on components one
+        # at a time to find what interferes with the physical mouse/keyboard.
+        #   HM_NO_CLUTCH=1   -> don't install the global right-Ctrl keyboard hook
+        #   HM_NO_MONITOR=1  -> don't install the physical-input low-level hooks
+        #   HM_NO_PREVIEW=1  -> don't show the OpenCV preview window (see render section)
+        if os.environ.get("HM_NO_CLUTCH"):
+            clutch_status = "DISABLED"
+        else:
+            try:
+                clutch_input.start()
+                clutch_status = "OK"
+            except Exception as exc:
+                clutch_status = "FAILED"
+                print(f"WARNING: Global clutch input listener failed to start: {exc}")
+
+        manual_input_suspend_on = False
+        if os.environ.get("HM_NO_MONITOR"):
+            pass
+        else:
+            try:
+                physical_input_monitor.start()
+                manual_input_suspend_on = True
+            except Exception as exc:
+                print(f"WARNING: Physical input monitor failed to start (manual-input suspend disabled): {exc}")
+
+        print(
+            f"[HandMouse] ready | manual-input-suspend="
+            f"{'ON' if manual_input_suspend_on else 'OFF'} | bimanual={config.bimanual.enabled} "
+            f"| clutch={clutch_status} | num_hands={num_hands} "
+            f"| preview={'OFF' if os.environ.get('HM_NO_PREVIEW') else 'ON'}"
+        )
 
         camera_reader = CameraReader(camera)
         inference_worker = InferenceWorker(camera_reader, tracker)
@@ -153,7 +191,6 @@ def main() -> None:
         inference_worker.start()
 
         if args.record_telemetry:
-            import os
             from handmouse.telemetry.writer import TelemetryWriter
             import handmouse.telemetry.writer as tel_writer
             filepath = args.record_telemetry
@@ -177,6 +214,7 @@ def main() -> None:
                     debug_view=debug_view,
                     interlock=interlock,
                     clutch_input=clutch_input,
+                    physical_input_monitor=physical_input_monitor,
                     move_mode=move_mode,
                     clutch_status=clutch_status,
                     telemetry_file=None,
@@ -239,6 +277,7 @@ def main() -> None:
         mouse.set_control_enabled(False)
         shortcut.set_enabled(False)
         clutch_input.stop()
+        physical_input_monitor.stop()
         camera.release()
         if tracker is not None:
             tracker.close()
@@ -260,6 +299,7 @@ def _run_loop(
     debug_view: DebugView,
     interlock: InteractionInterlock,
     clutch_input: Any | None = None,
+    physical_input_monitor: Any | None = None,
     move_mode: Any | None = None,
     clutch_status: str | None = None,
     telemetry_file: Any | None = None,
@@ -285,6 +325,7 @@ def _run_loop(
     grab_release_cooldown_until = 0
     was_alt_tab_active = False
     was_grabbing = False
+    prev_manual_suspend = False
 
     last_applied_config = None
     last_active_state = None
@@ -455,11 +496,31 @@ def _run_loop(
             break
 
         is_active = engagement_result.is_active
-        if is_active and hand_result.landmarks:
+        # The per-frame palm-facing override runs on multi.first, which in bimanual
+        # mode may be the mode-hand fist (pointer lock) and would wrongly force
+        # is_active False — killing clicks while locked. In bimanual the BimanualGate
+        # (mode-hand palm-hold to arm) is the engagement authority, so skip it there.
+        if is_active and hand_result.landmarks and not conf.ACTIVE_CONFIG.bimanual.enabled:
             label = getattr(hand_result, "handedness_label", None)
             if not _is_palm_facing_camera(hand_result.landmarks, label):
                 # Treat sideways or back-facing hands as inactive for gestures and cursor movement
                 is_active = False
+
+        # Stand down while the user is driving with the physical mouse/keyboard, so a
+        # hand resting on the real mouse (seen by the webcam) cannot fight manual input.
+        manual_suspend = (
+            physical_input_monitor is not None
+            and physical_input_monitor.is_recent(now_ms, PHYSICAL_INPUT_GRACE_MS)
+        )
+        if is_active and manual_suspend:
+            is_active = False
+        if manual_suspend != prev_manual_suspend:
+            print(
+                "[HandMouse] physical input detected -> gesture control SUSPENDED"
+                if manual_suspend
+                else "[HandMouse] physical input idle -> gesture control resumed"
+            )
+            prev_manual_suspend = manual_suspend
 
         mouse.set_control_enabled(is_active)
         shortcut.set_enabled(is_active)
@@ -560,10 +621,19 @@ def _run_loop(
             bimanual_cfg.enabled
             and gate_result is not None
             and gate_result.gate_active
+            and not gate_result.pointer_frozen
             and ptr_result_bm is not None
             and ptr_present_now
             and is_active
             and quality.ok
+        )
+        bimanual_gesture_active = (
+            bimanual_cfg.enabled
+            and gate_result is not None
+            and gate_result.gate_active
+            and ptr_obs_bm is not None
+            and ptr_present_now
+            and is_active
         )
 
         try:
@@ -575,7 +645,11 @@ def _run_loop(
                         else ptr_result_bm
                     )
                     delta = pointer.update(ptr_for_engine, now_ms)
-                    if delta is not None and (delta.dx != 0 or delta.dy != 0):
+                    # Auto pinch-freeze (P0) only when the hand is settling/aiming
+                    # (velocity below AUTO_FREEZE_VELOCITY_MAX). A fast cursor sweep
+                    # keeps moving even if the pinch ratio dips, so we don't stutter.
+                    auto_freeze = gesture.pointer_freeze_active and (pointer.last_velocity or 0.0) < AUTO_FREEZE_VELOCITY_MAX
+                    if delta is not None and (delta.dx != 0 or delta.dy != 0) and not auto_freeze:
                         mouse.move_relative(delta)
                         dx = delta.dx
                         dy = delta.dy
@@ -588,7 +662,8 @@ def _run_loop(
                     else hand_result
                 )
                 delta = pointer.update(pointer_hand_result, now_ms)
-                if delta is not None and (delta.dx != 0 or delta.dy != 0):
+                auto_freeze = gesture.pointer_freeze_active and (pointer.last_velocity or 0.0) < AUTO_FREEZE_VELOCITY_MAX
+                if delta is not None and (delta.dx != 0 or delta.dy != 0) and not auto_freeze:
                     mouse.move_relative(delta)
                     dx = delta.dx
                     dy = delta.dy
@@ -605,18 +680,12 @@ def _run_loop(
                         alt_tab_detector.reset()
                     grab_scroll.reset()
                     shortcut_detector.reset()
-                    if (
-                        gate_result is not None
-                        and gate_result.gate_active
-                        and ptr_obs_bm is not None
-                        and ptr_present_now
-                        and quality.ok
-                    ):
-                        candidates.extend(gesture.update(
-                            ptr_obs_bm,
-                            now_ms,
-                            mode_is_secondary=gate_result.mode_is_secondary,
-                        ))
+                    # Do not gate routed bimanual clicks on `quality.ok`: that value
+                    # is derived from the legacy single-hand `obs` (often multi.first),
+                    # so a left-hand fist can drop quality and wrongly suppress
+                    # gesture.update() even while the routed pointer hand is present.
+                    if bimanual_gesture_active:
+                        candidates.extend(gesture.update(ptr_obs_bm, now_ms))
                     else:
                         gesture.reset()
                 else:
@@ -740,7 +809,8 @@ def _run_loop(
             telemetry,
         )
 
-        cv2.imshow(WINDOW_NAME, debug_frame)
+        if not os.environ.get("HM_NO_PREVIEW"):
+            cv2.imshow(WINDOW_NAME, debug_frame)
 
         try:
             from handmouse.telemetry.writer import log_event

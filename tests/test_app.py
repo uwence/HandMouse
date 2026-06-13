@@ -96,6 +96,7 @@ class FakeGesture:
     def __init__(self, results: list[object]) -> None:
         self.results = list(results)
         self.calls: list[tuple[object, object, int]] = []
+        self.pointer_freeze_active = False
 
     def update(self, obs, now_ms: int) -> object:
         self.calls.append((obs, now_ms))
@@ -294,6 +295,32 @@ class FakeInferenceWorker:
         hand_result, frame, ts = item
         wrapped = (_wrap_multi(hand_result), frame, ts)
         self.buffer = FakeBuffer(wrapped)
+
+
+class FakeSequenceBuffer:
+    def __init__(self, items: list[tuple[object, object, int]]) -> None:
+        self.items = list(items)
+        self.current: tuple[object, object, int] | None = None
+
+    def wait_new_result(self, timeout: float) -> bool:
+        if not self.items:
+            return False
+        self.current = self.items.pop(0)
+        return True
+
+    def clear(self) -> None:
+        return None
+
+    def get(self) -> tuple[object, object, int]:
+        assert self.current is not None
+        return self.current
+
+
+class FakeSequenceInferenceWorker:
+    def __init__(self, items: list[tuple[object, object, int]]) -> None:
+        self.buffer = FakeSequenceBuffer(
+            [(_wrap_multi(hand_result), frame, ts) for hand_result, frame, ts in items]
+        )
 
 
 class FakeCameraReader:
@@ -1082,7 +1109,7 @@ class _FakeIdentityTracker:
             handedness_label="Right", handedness_score=0.9,
             raw_result=None, stale_ms=frame_age_ms, camera_space="mirrored",
         )
-        ptr_result = SimpleNamespace(
+        ptr_result = HandTrackingResult(
             landmarks=[FramePoint(0.5, 0.5)] * 21,
             thumb_tip=FramePoint(0.5, 0.5),
             index_tip=FramePoint(0.5, 0.5),
@@ -1100,16 +1127,20 @@ class _FakeIdentityTracker:
 class _FakeBimanualGate:
     """Always reports gate_active=True so safety gates upstream are the only thing stopping movement."""
 
-    def __init__(self) -> None:
+    def __init__(self, pointer_frozen: bool | list[bool] = False) -> None:
         self.calls: list[tuple] = []
+        self._frozen_sequence = list(pointer_frozen) if isinstance(pointer_frozen, list) else None
+        self.pointer_frozen = self._frozen_sequence[0] if self._frozen_sequence else bool(pointer_frozen)
 
     def update(self, mode_obs, pointer_obs, now_ms, pointer_stable=True):
         from handmouse.bimanual_gate import BimanualGateResult, BimanualGateState
         self.calls.append((mode_obs is not None, pointer_obs is not None, now_ms, pointer_stable))
+        if self._frozen_sequence:
+            self.pointer_frozen = self._frozen_sequence.pop(0)
         return BimanualGateResult(
             state=BimanualGateState.ACTIVE,
             gate_active=True,
-            mode_is_secondary=False,
+            pointer_frozen=self.pointer_frozen,
         )
 
 
@@ -1165,6 +1196,153 @@ def test_bimanual_does_not_move_pointer_when_quality_not_ok(
     mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=False)
     _run_loop(**kwargs)
     assert mouse.moves == [], "bimanual must respect tracking quality gate"
+
+
+def test_bimanual_does_not_move_pointer_when_pinch_freeze_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """All gates pass and the pointer engine produced a nonzero delta, but the
+    gesture detector signals a pinch in progress → cursor must not move."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    kwargs["gesture"].pointer_freeze_active = True
+    _run_loop(**kwargs)
+    assert mouse.moves == [], "pinch-freeze must suppress cursor motion at click time"
+
+
+def test_bimanual_moves_pointer_when_not_frozen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Control for the freeze test: same setup, freeze off → cursor does move."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    kwargs["gesture"].pointer_freeze_active = False
+    _run_loop(**kwargs)
+    assert mouse.moves != [], "pointer must move when active, quality ok, and not frozen"
+
+
+def test_bimanual_pointer_lock_freezes_cursor_but_allows_clicks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Left-fist pointer lock (pointer_frozen=True): cursor must not move even
+    though the pointer engine produced a nonzero delta and all other gates pass,
+    but the gesture detector must still run so clicks fire at the locked spot."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    kwargs["bimanual_gate"] = _FakeBimanualGate(pointer_frozen=True)
+    gesture = kwargs["gesture"]
+    _run_loop(**kwargs)
+    assert mouse.moves == [], "left-fist pointer lock must freeze the cursor"
+    assert kwargs["pointer"].reset_calls == 1, "locked pointer frames must reset the pointer engine"
+    assert gesture.calls, "gesture detector must still run while locked so clicks work"
+
+
+def test_bimanual_pointer_lock_dispatches_click_left(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Left-fist pointer lock freezes movement but must still route right-hand
+    thumb-index click candidates through policy/action dispatch."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    router = FakeActionRouter([[SimpleNamespace(action="click_left", executed=True)]])
+    kwargs["action_router"] = router
+    kwargs["bimanual_gate"] = _FakeBimanualGate(pointer_frozen=True)
+    kwargs["gesture"] = FakeGesture(
+        [[GestureCandidate("pinch", "click_left", "fire", 1.0, RiskClass.MEDIUM, True)]]
+    )
+    _run_loop(**kwargs)
+    assert mouse.moves == [], "left-fist pointer lock must freeze the cursor"
+    assert router.calls, "click candidate must reach action dispatch while pointer is locked"
+    assert [intent.action for intent in router.calls[0]] == ["click_left"]
+
+
+def test_bimanual_pointer_lock_to_open_palm_resets_before_moving(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fist -> open palm must reset the pointer engine during the locked frame so
+    movement resumes from a fresh pointer sample instead of a stale accumulated delta."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    frame = SimpleNamespace(shape=(480, 640, 3))
+    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=[])
+    pointer = FakePointer(updates=[ScreenDelta(7, 3)])
+    kwargs["cv2"] = FakeCv2(wait_keys=[0, 0, ord("q")])
+    kwargs["engagement"] = FakeEngagement(
+        [
+            make_engagement_result(active=True, state="ACTIVE"),
+            make_engagement_result(active=True, state="ACTIVE"),
+        ]
+    )
+    kwargs["inference_worker"] = FakeSequenceInferenceWorker(
+        [
+            (hand_result, frame, 1000),
+            (hand_result, frame, 1016),
+        ]
+    )
+    kwargs["pointer"] = pointer
+    kwargs["bimanual_gate"] = _FakeBimanualGate(pointer_frozen=[True, False])
+    _run_loop(**kwargs)
+    assert pointer.reset_calls == 1, "locked fist frame must clear pointer state"
+    assert len(pointer.update_calls) == 1, "pointer should update only after returning to open palm"
+    assert mouse.moves == [ScreenDelta(7, 3)]
+
+
+def test_bimanual_pointer_lock_allows_clicks_when_legacy_quality_is_bad(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: bimanual click routing must not depend on the legacy single-hand
+    quality gate, because that quality is computed from multi.first rather than
+    the routed pointer hand and can drop when the mode hand is a fist."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=False)
+    kwargs["bimanual_gate"] = _FakeBimanualGate(pointer_frozen=True)
+    gesture = kwargs["gesture"]
+    _run_loop(**kwargs)
+    assert mouse.moves == [], "bad legacy quality must still keep the locked cursor frozen"
+    assert gesture.calls, "bad multi.first quality must not suppress routed bimanual clicks"
+
+
+def test_bimanual_does_not_kill_active_on_non_palm_facing_first_hand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: the per-frame palm-facing override runs on multi.first, which in
+    bimanual mode may be the mode-hand fist (pointer lock). It must NOT force
+    is_active False, or locking with a fist would kill all clicks."""
+    import handmouse.app as app
+    monkeypatch.setattr(app, "_is_palm_facing_camera", lambda landmarks, label: False)
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    # multi.first carries 21 landmarks so the palm-facing override is actually reached.
+    frame = SimpleNamespace(shape=(480, 640, 3))
+    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=[FramePoint(0.5, 0.5)] * 21)
+    kwargs["inference_worker"] = FakeInferenceWorker((hand_result, frame, 1000))
+    gesture = kwargs["gesture"]
+    _run_loop(**kwargs)
+    assert gesture.calls, "bimanual must not let a non-palm-facing multi.first hand disable gestures"
+
+
+class _FakePhysicalInputMonitor:
+    def __init__(self, recent: bool) -> None:
+        self._recent = recent
+        self.calls: list[tuple[int, int]] = []
+
+    def is_recent(self, now_ms: int, grace_ms: int) -> bool:
+        self.calls.append((now_ms, grace_ms))
+        return self._recent
+
+
+def test_physical_input_suspends_gesture_control(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When real mouse/keyboard input is recent, HandMouse must stand down: no
+    cursor movement even with all gates passing and a nonzero delta."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    kwargs["physical_input_monitor"] = _FakePhysicalInputMonitor(recent=True)
+    _run_loop(**kwargs)
+    assert mouse.moves == [], "recent physical input must suspend gesture control"
+
+
+def test_no_physical_input_does_not_suspend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Control: with no recent physical input, control runs normally."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    kwargs["physical_input_monitor"] = _FakePhysicalInputMonitor(recent=False)
+    _run_loop(**kwargs)
+    assert mouse.moves != [], "pointer must move when no physical input is suspending control"
 
 
 def test_build_frame_sample_schema_contains_world_z_and_quality() -> None:

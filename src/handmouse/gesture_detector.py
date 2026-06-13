@@ -20,6 +20,7 @@ class GestureConfig:
     cooldown_ms: int = 150
     emit_on_release: bool = True
     bimanual_mode: bool = False
+    pinch_freeze_ratio: float = 0.0  # Auto pinch-freeze (P0): freeze pointer when thumb-index ratio drops below this. 0 = disabled (default). The explicit left-fist pointer lock is the precision path; auto-freeze caused mid-move stutter, so it is off by default.
 
 
 class GestureState(Enum):
@@ -47,7 +48,9 @@ class GestureDetector:
         self._right_release_count = 0
         self._right_cooldown_until_ms = 0
 
-    def update(self, obs: HandObservation | None, now_ms: int, mode_is_secondary: bool = False) -> list[GestureCandidate]:
+        self._pointer_freeze = False
+
+    def update(self, obs: HandObservation | None, now_ms: int) -> list[GestureCandidate]:
         if obs is None or not obs.image_landmarks or len(obs.image_landmarks) < 21:
             self.reset()
             return []
@@ -146,21 +149,18 @@ class GestureDetector:
                                 GestureCandidate("pinch", "drag_release", "fire", 1.0, RiskClass.MEDIUM, True)
                             )
                         if self.config.emit_on_release and not was_dragging:
-                            # Right-click modifier takes precedence over the double-click window
-                            if mode_is_secondary:
-                                candidates.append(GestureCandidate("pinch", "click_right", "fire", 1.0, RiskClass.MEDIUM, True))
-                                self._last_left_click_ms = 0
-                            elif self._last_left_click_ms > 0 and now_ms - self._last_left_click_ms < 300:
+                            if self._last_left_click_ms > 0 and now_ms - self._last_left_click_ms < 300:
                                 candidates.append(GestureCandidate("pinch", "double_click", "fire", 1.0, RiskClass.MEDIUM, True))
                                 self._last_left_click_ms = 0
                             else:
                                 candidates.append(GestureCandidate("pinch", "click_left", "fire", 1.0, RiskClass.MEDIUM, True))
                                 self._last_left_click_ms = now_ms
 
-        # 2. Update Right State Machine — disabled in bimanual_mode
-        if self.config.bimanual_mode:
-            pass
-        elif self._left_state != GestureState.PINCH_OPEN:
+        # 2. Update Right State Machine (thumb-middle pinch = right click).
+        # Runs in both single-hand and bimanual mode: in bimanual the pointer
+        # hand's thumb-middle pinch is how right-click is produced (the left
+        # fist is now the pointer-lock, not a right-click modifier).
+        if self._left_state != GestureState.PINCH_OPEN:
             self._right_state = GestureState.PINCH_OPEN
             self._right_close_count = 0
             self._right_release_count = 0
@@ -199,7 +199,27 @@ class GestureDetector:
                         if self.config.emit_on_release:
                             candidates.append(GestureCandidate("pinch", "click_right", "fire", 1.0, RiskClass.MEDIUM, True))
 
+        self._pointer_freeze = self._compute_pointer_freeze(left_ratio, right_ratio)
         return candidates
+
+    @property
+    def pointer_freeze_active(self) -> bool:
+        return self._pointer_freeze
+
+    def _compute_pointer_freeze(self, left_ratio: float, right_ratio: float) -> bool:
+        if self.config.pinch_freeze_ratio <= 0:
+            return False
+        left_engaged = (
+            left_ratio < self.config.pinch_freeze_ratio
+            or self._left_state != GestureState.PINCH_OPEN
+        )
+        if left_engaged and not self._left_dragging:
+            return True
+        right_engaged = (
+            right_ratio < self.config.pinch_freeze_ratio
+            or self._right_state != GestureState.PINCH_OPEN
+        )
+        return right_engaged
 
     def reset(self) -> None:
         self._left_state = GestureState.PINCH_OPEN
@@ -213,6 +233,8 @@ class GestureDetector:
         self._right_close_count = 0
         self._right_release_count = 0
         self._right_cooldown_until_ms = 0
+
+        self._pointer_freeze = False
 
         if self.interlock:
             self.interlock.release(InterlockType.CLICK)

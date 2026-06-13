@@ -18,7 +18,7 @@ class BimanualGateState(Enum):
 class BimanualGateResult:
     state: BimanualGateState
     gate_active: bool
-    mode_is_secondary: bool
+    pointer_frozen: bool
 
 
 class BimanualGate:
@@ -63,12 +63,14 @@ class BimanualGate:
             self._state = self._update_suspended(mode_present, mode_palm_open, mode_fist, now_ms)
 
         gate_active = self._state == BimanualGateState.ACTIVE
-        mode_is_secondary = gate_active and mode_fist
+        # Mode-hand fist = explicit pointer lock: freeze the cursor in place so
+        # the pointer hand can click/right-click a small target without drift.
+        pointer_frozen = gate_active and mode_fist
 
         return BimanualGateResult(
             state=self._state,
             gate_active=gate_active,
-            mode_is_secondary=mode_is_secondary,
+            pointer_frozen=pointer_frozen,
         )
 
     def reset(self) -> None:

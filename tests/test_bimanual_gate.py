@@ -85,13 +85,21 @@ def test_suspended_to_idle_after_idle_grace():
     assert r.state == BimanualGateState.IDLE
 
 
-def test_fist_sets_mode_is_secondary():
+def test_fist_sets_pointer_frozen():
     g = _gate(open_hold_ms=0)
     g.update(mode_obs=OPEN, pointer_obs=OPEN, now_ms=0)
     g.update(mode_obs=OPEN, pointer_obs=OPEN, now_ms=16)   # ACTIVE
     r = g.update(mode_obs=FIST, pointer_obs=OPEN, now_ms=32)
     assert r.gate_active is True
-    assert r.mode_is_secondary is True
+    assert r.pointer_frozen is True
+
+
+def test_open_palm_does_not_freeze_pointer():
+    g = _gate(open_hold_ms=0)
+    g.update(mode_obs=OPEN, pointer_obs=OPEN, now_ms=0)
+    r = g.update(mode_obs=OPEN, pointer_obs=OPEN, now_ms=16)   # ACTIVE
+    assert r.gate_active is True
+    assert r.pointer_frozen is False
 
 
 def test_idle_to_armed_resets_when_mode_hand_closes():
