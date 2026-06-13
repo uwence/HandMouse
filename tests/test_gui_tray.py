@@ -142,6 +142,7 @@ def test_gui_run_and_save(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tk, "StringVar", MockVar)
     monkeypatch.setattr(tk, "DoubleVar", MockVar)
     monkeypatch.setattr(tk, "BooleanVar", MockVar)
+    monkeypatch.setattr(tk, "IntVar", MockVar)
     monkeypatch.setattr(tk, "Frame", MagicMock())
     monkeypatch.setattr(tk, "Label", MagicMock())
     monkeypatch.setattr(tk, "Scale", MagicMock())

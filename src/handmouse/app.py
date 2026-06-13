@@ -315,6 +315,17 @@ def _run_loop(
                 last_applied_config=last_applied_config,
                 osd=osd,
             )
+            # Hot-reload bimanual timing params on identity tracker and gate.
+            # bimanual.enabled is NOT hot-reloadable because it changes MediaPipe
+            # num_hands, which is fixed at HandTracker creation — app restart required.
+            if identity_tracker is not None:
+                identity_tracker.grace_ms = config.bimanual.identity_grace_ms
+                identity_tracker.min_confidence = config.bimanual.handedness_min_score
+            if bimanual_gate is not None:
+                bimanual_gate.open_hold_ms = config.bimanual.open_hold_ms
+                bimanual_gate.open_stable_frames = config.bimanual.open_stable_frames
+                bimanual_gate.suspend_grace_ms = config.bimanual.suspend_grace_ms
+                bimanual_gate.idle_grace_ms = config.bimanual.idle_grace_ms
 
         if inference_worker is not None and camera_reader is not None:
             # Multi-threaded path

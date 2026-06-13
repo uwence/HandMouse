@@ -8,6 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 from handmouse import app
 from handmouse.config import (
     AppConfig,
+    BimanualConfig,
     CameraConfig,
     ClutchConfig,
     ControlRegion,
@@ -36,7 +37,7 @@ def _build_settings_ui(root) -> None:
     _gui_window = top
 
     top.title("HandMouse Settings")
-    top.geometry("450x820")
+    top.geometry("450x980")
     top.resizable(False, False)
 
     # Configure dark theme colors
@@ -139,6 +140,13 @@ def _build_settings_ui(root) -> None:
     at_var = tk.BooleanVar(master=top, value=switches.alt_tab)
     wd_var = tk.BooleanVar(master=top, value=switches.win_d)
     osd_var = tk.BooleanVar(master=top, value=config.show_osd)
+
+    # Bimanual (experimental) variables
+    bm_enabled_var = tk.BooleanVar(master=top, value=config.bimanual.enabled)
+    bm_dominant_var = tk.StringVar(master=top, value=config.bimanual.dominant_hand)
+    bm_open_hold_var = tk.IntVar(master=top, value=config.bimanual.open_hold_ms)
+    bm_ptr_stable_var = tk.IntVar(master=top, value=config.bimanual.pointer_stable_frames)
+    bm_hand_conf_var = tk.DoubleVar(master=top, value=config.bimanual.handedness_min_score)
 
     # 1. Camera & Pointer Card
     card1 = create_card(scroll_inner, "Camera & Speed Configuration")
@@ -243,6 +251,97 @@ def _build_settings_ui(root) -> None:
     )
     scroll_sens_scale.pack(side="right", fill="x", expand=True, padx=(10, 5))
 
+    # 3b. Bimanual (experimental) Card
+    card_bm = create_card(scroll_inner, "Bimanual Mouse Mode (Experimental)")
+
+    bm_note = tk.Label(
+        card_bm,
+        text="Mode hand (non-dominant) = gate + right-click modifier.\n"
+             "Pointer hand (dominant) = move + click + drag.\n"
+             "Toggling 'Enabled' requires an app restart.",
+        bg=card_color, fg="#a6adc8", font=(font_family, 8), justify="left",
+    )
+    bm_note.pack(anchor="w", padx=10, pady=(0, 5))
+
+    bm_row1 = tk.Frame(card_bm, bg=card_color)
+    bm_row1.pack(fill="x", padx=10, pady=3)
+    ttk.Checkbutton(bm_row1, text="Enable Bimanual Mode (restart required)", variable=bm_enabled_var).pack(side="left")
+
+    bm_row2 = tk.Frame(card_bm, bg=card_color)
+    bm_row2.pack(fill="x", padx=10, pady=5)
+    tk.Label(bm_row2, text="Dominant (pointer) hand:", bg=card_color, fg=text_color).pack(side="left")
+    bm_dominant_combo = ttk.Combobox(
+        bm_row2, textvariable=bm_dominant_var, values=["right", "left"],
+        width=8, state="readonly",
+    )
+    bm_dominant_combo.pack(side="right")
+
+    bm_row3 = tk.Frame(card_bm, bg=card_color)
+    bm_row3.pack(fill="x", padx=10, pady=5)
+    tk.Label(bm_row3, text="Palm-open hold (ms):", bg=card_color, fg=text_color).pack(side="left")
+    bm_open_hold_lbl = tk.Label(bm_row3, text=f"{bm_open_hold_var.get()}", bg=card_color, fg=accent_color, width=6)
+    bm_open_hold_lbl.pack(side="right")
+
+    def _update_open_hold_lbl(val):
+        bm_open_hold_lbl.config(text=f"{int(float(val))}")
+
+    bm_open_hold_scale = tk.Scale(
+        bm_row3, from_=0, to=1000, resolution=50, orient="horizontal",
+        variable=bm_open_hold_var, bg=card_color, fg=text_color, troughcolor=entry_bg,
+        activebackground=accent_color, highlightthickness=0, bd=0, showvalue=False,
+        command=_update_open_hold_lbl,
+    )
+    bm_open_hold_scale.pack(side="right", fill="x", expand=True, padx=(10, 5))
+
+    bm_row4 = tk.Frame(card_bm, bg=card_color)
+    bm_row4.pack(fill="x", padx=10, pady=5)
+    tk.Label(bm_row4, text="Pointer stable frames:", bg=card_color, fg=text_color).pack(side="left")
+    bm_ptr_stable_lbl = tk.Label(bm_row4, text=f"{bm_ptr_stable_var.get()}", bg=card_color, fg=accent_color, width=6)
+    bm_ptr_stable_lbl.pack(side="right")
+
+    def _update_ptr_stable_lbl(val):
+        bm_ptr_stable_lbl.config(text=f"{int(float(val))}")
+
+    bm_ptr_stable_scale = tk.Scale(
+        bm_row4, from_=1, to=10, resolution=1, orient="horizontal",
+        variable=bm_ptr_stable_var, bg=card_color, fg=text_color, troughcolor=entry_bg,
+        activebackground=accent_color, highlightthickness=0, bd=0, showvalue=False,
+        command=_update_ptr_stable_lbl,
+    )
+    bm_ptr_stable_scale.pack(side="right", fill="x", expand=True, padx=(10, 5))
+
+    bm_row5 = tk.Frame(card_bm, bg=card_color)
+    bm_row5.pack(fill="x", padx=10, pady=5)
+    tk.Label(bm_row5, text="Handedness min score:", bg=card_color, fg=text_color).pack(side="left")
+    bm_hand_conf_lbl = tk.Label(bm_row5, text=f"{bm_hand_conf_var.get():.2f}", bg=card_color, fg=accent_color, width=6)
+    bm_hand_conf_lbl.pack(side="right")
+
+    def _update_hand_conf_lbl(val):
+        bm_hand_conf_lbl.config(text=f"{float(val):.2f}")
+
+    bm_hand_conf_scale = tk.Scale(
+        bm_row5, from_=0.0, to=1.0, resolution=0.05, orient="horizontal",
+        variable=bm_hand_conf_var, bg=card_color, fg=text_color, troughcolor=entry_bg,
+        activebackground=accent_color, highlightthickness=0, bd=0, showvalue=False,
+        command=_update_hand_conf_lbl,
+    )
+    bm_hand_conf_scale.pack(side="right", fill="x", expand=True, padx=(10, 5))
+
+    def _build_bimanual_config() -> BimanualConfig:
+        # Preserve other bimanual fields not exposed in the GUI (open_stable_frames,
+        # suspend_grace_ms, idle_grace_ms, identity_grace_ms) from the current config.
+        return BimanualConfig(
+            enabled=bm_enabled_var.get(),
+            dominant_hand=bm_dominant_var.get(),
+            open_hold_ms=int(bm_open_hold_var.get()),
+            open_stable_frames=config.bimanual.open_stable_frames,
+            suspend_grace_ms=config.bimanual.suspend_grace_ms,
+            idle_grace_ms=config.bimanual.idle_grace_ms,
+            identity_grace_ms=config.bimanual.identity_grace_ms,
+            pointer_stable_frames=int(bm_ptr_stable_var.get()),
+            handedness_min_score=float(bm_hand_conf_var.get()),
+        )
+
     # Preset management callbacks
     def on_import_preset():
         file_path = filedialog.askopenfilename(
@@ -283,7 +382,17 @@ def _build_settings_ui(root) -> None:
             pinch_open_lbl.config(text=f"{imported_config.gesture_config.pinch_open_ratio:.3f}")
             scroll_sens_var.set(imported_config.grab_scroll_config.scroll_sensitivity)
             scroll_sens_lbl.config(text=f"{imported_config.grab_scroll_config.scroll_sensitivity:.0f}")
-            
+
+            bm = imported_config.bimanual
+            bm_enabled_var.set(bm.enabled)
+            bm_dominant_var.set(bm.dominant_hand)
+            bm_open_hold_var.set(bm.open_hold_ms)
+            bm_open_hold_lbl.config(text=f"{bm.open_hold_ms}")
+            bm_ptr_stable_var.set(bm.pointer_stable_frames)
+            bm_ptr_stable_lbl.config(text=f"{bm.pointer_stable_frames}")
+            bm_hand_conf_var.set(bm.handedness_min_score)
+            bm_hand_conf_lbl.config(text=f"{bm.handedness_min_score:.2f}")
+
             messagebox.showinfo("Import Success", "Preset imported successfully! Click 'Save & Apply' to finalize.", parent=top)
         except Exception as exc:
             messagebox.showerror("Import Error", f"Failed to import preset: {exc}", parent=top)
@@ -333,8 +442,9 @@ def _build_settings_ui(root) -> None:
                     scroll_sensitivity=scroll_sens_var.get(),
                 ),
                 show_osd=osd_var.get(),
+                bimanual=_build_bimanual_config(),
             )
-            
+
             import yaml
             with open(file_path, "w", encoding="utf-8") as f:
                 yaml.dump(dataclass_to_dict(current_config), f, default_flow_style=False, sort_keys=False)
@@ -375,6 +485,17 @@ def _build_settings_ui(root) -> None:
             )
             return
 
+        # Validate dominant_hand
+        if bm_dominant_var.get() not in ("left", "right"):
+            messagebox.showerror(
+                "Validation Error",
+                "Bimanual dominant_hand must be 'left' or 'right'.",
+            )
+            return
+
+        bimanual_was_enabled = config.bimanual.enabled
+        bimanual_will_be_enabled = bm_enabled_var.get()
+
         new_config = conf.AppConfig(
             camera=conf.CameraConfig(
                 width=config.camera.width,
@@ -409,15 +530,25 @@ def _build_settings_ui(root) -> None:
                 scroll_sensitivity=scroll_sens_var.get(),
             ),
             show_osd=osd_var.get(),
+            bimanual=_build_bimanual_config(),
         )
-        
+
         # Save to file
         save_config(new_config)
-        
+
         # Update running config
         conf.ACTIVE_CONFIG = new_config
-        
-        messagebox.showinfo("Success", "Configuration saved and applied successfully!", parent=top)
+
+        # Bimanual.enabled controls MediaPipe num_hands, fixed at tracker
+        # creation. Other bimanual params live-reload via _apply_runtime_settings.
+        if bimanual_was_enabled != bimanual_will_be_enabled:
+            messagebox.showinfo(
+                "Restart Required",
+                "Bimanual mode 'Enabled' toggled. Restart HandMouse to apply.",
+                parent=top,
+            )
+        else:
+            messagebox.showinfo("Success", "Configuration saved and applied successfully!", parent=top)
 
     def on_cancel():
         top.destroy()
