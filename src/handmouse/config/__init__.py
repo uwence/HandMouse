@@ -77,6 +77,19 @@ class PolicyConfig:
 
 
 @dataclass(frozen=True)
+class BimanualConfig:
+    enabled: bool = False
+    dominant_hand: str = "right"
+    open_hold_ms: int = 250
+    open_stable_frames: int = 4
+    suspend_grace_ms: int = 150
+    idle_grace_ms: int = 500
+    identity_grace_ms: int = 500
+    pointer_stable_frames: int = 3
+    handedness_min_score: float = 0.75
+
+
+@dataclass(frozen=True)
 class AppConfig:
     camera: CameraConfig
     pointer: PointerConfig
@@ -89,6 +102,7 @@ class AppConfig:
     grab_scroll_config: ExtendedGrabScrollConfig = ExtendedGrabScrollConfig()
     view: ViewConfig = ViewConfig()
     show_osd: bool = True
+    bimanual: BimanualConfig = BimanualConfig()
 
 
 DEFAULT_CONFIG = AppConfig(
@@ -122,6 +136,7 @@ DEFAULT_CONFIG = AppConfig(
     gesture_switches=GestureSwitches(),
     gesture_config=ExtendedGestureConfig(),
     grab_scroll_config=ExtendedGrabScrollConfig(),
+    bimanual=BimanualConfig(),
 )
 
 CONFIG_DIR = os.path.expanduser("~/.handmouse")

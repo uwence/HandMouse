@@ -82,7 +82,13 @@ def main() -> None:
             if running_mode_str == "live_stream"
             else vision.RunningMode.VIDEO
         )
-        tracker = HandTracker(running_mode=tracker_mode, num_hands=1)
+        # Only spin up two-hand inference when bimanual mode is actually enabled.
+        # Two-hand MediaPipe is heavier (lower FPS) and makes multi_result.first
+        # ambiguous when an idle second hand wanders into frame, so legacy
+        # single-hand mode must keep num_hands=1. Toggling bimanual.enabled at
+        # runtime requires an app restart to swap tracker shape.
+        num_hands = 2 if config.bimanual.enabled else 1
+        tracker = HandTracker(running_mode=tracker_mode, num_hands=num_hands)
 
         pointer = PointerEngine(
             PointerEngineConfig(
@@ -117,7 +123,20 @@ def main() -> None:
             explicit_confirm_required=config.policy.explicit_confirm_required,
         )
         action_router = ActionRouter(mouse, shortcut)
-        
+
+        from handmouse.tracking.identity import HandIdentityTracker
+        from handmouse.bimanual_gate import BimanualGate
+        identity_tracker = HandIdentityTracker(
+            grace_ms=config.bimanual.identity_grace_ms,
+            min_confidence=config.bimanual.handedness_min_score,
+        )
+        bimanual_gate = BimanualGate(
+            open_hold_ms=config.bimanual.open_hold_ms,
+            open_stable_frames=config.bimanual.open_stable_frames,
+            suspend_grace_ms=config.bimanual.suspend_grace_ms,
+            idle_grace_ms=config.bimanual.idle_grace_ms,
+        )
+
         from handmouse.osd import OSDManager
         osd = OSDManager(enabled=config.show_osd)
         
@@ -168,6 +187,8 @@ def main() -> None:
                     quality_gate=quality_gate,
                     policy=policy,
                     action_router=action_router,
+                    identity_tracker=identity_tracker,
+                    bimanual_gate=bimanual_gate,
                 )
             except Exception as e:
                 print(f"Error in HandMouse loop: {e}")
@@ -249,6 +270,8 @@ def _run_loop(
     quality_gate: TrackingQualityGate | None = None,
     policy: GesturePolicy | None = None,
     action_router: ActionRouter | None = None,
+    identity_tracker: Any | None = None,
+    bimanual_gate: Any | None = None,
 ) -> None:
     previous_frame_time = time.perf_counter()
     previous_frame_capture_time = previous_frame_time
@@ -307,11 +330,11 @@ def _run_loop(
                 continue
 
             inference_worker.buffer.clear()
-            hand_result, frame, now_ms = inference_worker.buffer.get()
-            if frame is None or hand_result is None:
+            multi_result, frame, now_ms = inference_worker.buffer.get()
+            if frame is None or multi_result is None:
                 continue
 
-            raw_hand_result = hand_result
+            raw_hand_result = multi_result.first
             now = time.perf_counter()
             frame_capture_time = now_ms / 1000.0
             frame_age_ms = int((now - frame_capture_time) * 1000)
@@ -335,10 +358,18 @@ def _run_loop(
             fps = _fps(previous_frame_time, now)
             previous_frame_time = now
 
-            hand_result = tracker.process(frame, frame_timestamp_ms=now_ms)
-            
-        raw_hand_result = hand_result
-        hand_result = coordinate_mapper.unify_hand_result(raw_hand_result, conf.ACTIVE_CONFIG.camera.input_is_mirrored)
+            multi_result = tracker.process(frame, frame_timestamp_ms=now_ms)
+            raw_hand_result = multi_result.first
+
+        from handmouse.hand_tracker import HandTrackingResult as _HTR
+        hand_result = coordinate_mapper.unify_hand_result(
+            raw_hand_result, conf.ACTIVE_CONFIG.camera.input_is_mirrored
+        ) if raw_hand_result is not None else _HTR(
+            landmarks=[], thumb_tip=None, index_tip=None,
+            raw_landmarks=None, world_landmarks=None,
+            handedness_label=None, handedness_confidence=None,
+        )
+        unified_multi = None  # computed lazily in the bimanual branch to avoid redundant unify_hand_result calls
         
         # Update calibration state if active
         try:
@@ -473,11 +504,73 @@ def _run_loop(
             frame_h = getattr(config.camera, "height", 480)
         quality = quality_gate.update(obs, frame_w, frame_h)
 
+        bimanual_cfg = conf.ACTIVE_CONFIG.bimanual
+        gate_result = None
+        mode_obs_bm = None
+        ptr_obs_bm = None
+        ptr_result_bm = None
+        mode_present_now = False
+        ptr_present_now = False
+
+        if bimanual_cfg.enabled and identity_tracker is not None and bimanual_gate is not None:
+            from handmouse.coordinate_mapper import unify_multi_hand_result as _umhr
+            unified_multi = _umhr(multi_result, conf.ACTIVE_CONFIG.camera.input_is_mirrored)
+            identified = identity_tracker.update(unified_multi, now_ms, frame_age_ms)
+            mode_label = "Left" if bimanual_cfg.dominant_hand == "right" else "Right"
+            if mode_label == "Left":
+                mode_obs_bm = identified.left_obs
+                mode_present_now = identified.left_present
+                ptr_obs_bm = identified.right_obs
+                ptr_result_bm = identified.right_result
+                ptr_stable_frames = identified.right_stable_frames
+                ptr_present_now = identified.right_present
+            else:
+                mode_obs_bm = identified.right_obs
+                mode_present_now = identified.right_present
+                ptr_obs_bm = identified.left_obs
+                ptr_result_bm = identified.left_result
+                ptr_stable_frames = identified.left_stable_frames
+                ptr_present_now = identified.left_present
+            pointer_stable = ptr_present_now and ptr_stable_frames >= bimanual_cfg.pointer_stable_frames
+            # Only feed the gate a mode observation when the mode hand was
+            # actually seen this frame. Cached obs from the identity grace
+            # period would otherwise keep refreshing _mode_last_seen_ms and
+            # prevent the gate's suspend/idle timers from ever firing.
+            gate_mode_obs = mode_obs_bm if mode_present_now else None
+            gate_ptr_obs = ptr_obs_bm if ptr_present_now else None
+            gate_result = bimanual_gate.update(
+                gate_mode_obs, gate_ptr_obs, now_ms, pointer_stable=pointer_stable
+            )
+
         drag_runtime_active = bool(getattr(action_router, "_drag_active", False))
         effective_move_active = (is_active and move_mode_result.movement_enabled) or drag_runtime_active
 
+        bimanual_pointer_active = (
+            bimanual_cfg.enabled
+            and gate_result is not None
+            and gate_result.gate_active
+            and ptr_result_bm is not None
+            and ptr_present_now
+            and is_active
+            and quality.ok
+        )
+
         try:
-            if effective_move_active:
+            if bimanual_cfg.enabled:
+                if bimanual_pointer_active:
+                    ptr_for_engine = (
+                        _mirror_hand_result_x(ptr_result_bm)
+                        if getattr(config.view, "render_mirrored", False)
+                        else ptr_result_bm
+                    )
+                    delta = pointer.update(ptr_for_engine, now_ms)
+                    if delta is not None and (delta.dx != 0 or delta.dy != 0):
+                        mouse.move_relative(delta)
+                        dx = delta.dx
+                        dy = delta.dy
+                else:
+                    pointer.reset()
+            elif effective_move_active:
                 pointer_hand_result = (
                     _mirror_hand_result_x(hand_result)
                     if getattr(config.view, "render_mirrored", False)
@@ -492,33 +585,57 @@ def _run_loop(
                 pointer.reset()
                 
             if is_active:
-                if alt_tab_detector is not None:
-                    if clutch_snapshot.clutch_down or move_mode_result.movement_enabled:
+                if bimanual_cfg.enabled:
+                    # v1 bimanual mode: only pointer move + left/right click + drag.
+                    # alt_tab, grab_scroll, shortcut detectors all consume the legacy
+                    # single-hand `obs` (multi.first) which is not the routed pointer hand,
+                    # so disable them entirely to avoid the mode hand triggering them.
+                    if alt_tab_detector is not None:
                         alt_tab_detector.reset()
-                    else:
-                        candidates.extend(alt_tab_detector.update(hand_result.landmarks, now_ms))
-
-                candidates.extend(grab_scroll.update(obs, now_ms))
-                candidates.extend(gesture.update(obs, now_ms))
-                
-                shortcut_blocked_by_move = (
-                    clutch_snapshot.clutch_down
-                    or move_mode_result.movement_enabled
-                    or drag_runtime_active
-                )
-                if shortcut_blocked_by_move:
+                    grab_scroll.reset()
                     shortcut_detector.reset()
-                else:
-                    shortcut_point = _palm_center_point(hand_result.landmarks) if hand_result else None
-                    candidates.extend(
-                        shortcut_detector.update(
-                            obs,
+                    if (
+                        gate_result is not None
+                        and gate_result.gate_active
+                        and ptr_obs_bm is not None
+                        and ptr_present_now
+                        and quality.ok
+                    ):
+                        candidates.extend(gesture.update(
+                            ptr_obs_bm,
                             now_ms,
-                            shortcut_point,
-                            palm_open=palm_visible,
-                            generic_pose_active=move_pose,
-                        )
+                            mode_is_secondary=gate_result.mode_is_secondary,
+                        ))
+                    else:
+                        gesture.reset()
+                else:
+                    if alt_tab_detector is not None:
+                        if clutch_snapshot.clutch_down or move_mode_result.movement_enabled:
+                            alt_tab_detector.reset()
+                        else:
+                            candidates.extend(alt_tab_detector.update(hand_result.landmarks, now_ms))
+
+                    candidates.extend(grab_scroll.update(obs, now_ms))
+                    candidates.extend(gesture.update(obs, now_ms))
+
+                    shortcut_blocked_by_move = (
+                        clutch_snapshot.clutch_down
+                        or move_mode_result.movement_enabled
+                        or drag_runtime_active
                     )
+                    if shortcut_blocked_by_move:
+                        shortcut_detector.reset()
+                    else:
+                        shortcut_point = _palm_center_point(hand_result.landmarks) if hand_result else None
+                        candidates.extend(
+                            shortcut_detector.update(
+                                obs,
+                                now_ms,
+                                shortcut_point,
+                                palm_open=palm_visible,
+                                generic_pose_active=move_pose,
+                            )
+                        )
             else:
                 if alt_tab_detector is not None:
                     alt_tab_detector.reset()
@@ -680,6 +797,7 @@ def _apply_runtime_settings(
         gesture.config = GestureConfig(
             pinch_close_ratio=config.gesture_config.pinch_close_ratio,
             pinch_open_ratio=config.gesture_config.pinch_open_ratio,
+            bimanual_mode=config.bimanual.enabled,
         )
     # Update grab scroll config
     if hasattr(grab_scroll, "config"):

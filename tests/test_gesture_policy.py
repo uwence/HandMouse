@@ -123,7 +123,19 @@ def test_policy_requires_explicit_confirm_for_task_view_open() -> None:
     assert decisions[0].payload["blocked_by"] == "explicit_confirm_required"
 
 
-def test_policy_requires_explicit_confirm_for_palm_swipe() -> None:
+def test_policy_requires_explicit_confirm_for_palm_swipe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # swipe_left_palm is gated by GestureSwitches.win_d (default False).
+    # Force it on so we exercise the explicit-confirm branch instead of
+    # falling through to "feature_disabled", which depends on whatever the
+    # user/CI has in ~/.handmouse/config.yaml.
+    switches = replace(GestureSwitches(), win_d=True)
+    monkeypatch.setattr(
+        config_module,
+        "ACTIVE_CONFIG",
+        replace(config_module.ACTIVE_CONFIG, gesture_switches=switches),
+    )
     policy = GesturePolicy()
 
     decisions = policy.evaluate(

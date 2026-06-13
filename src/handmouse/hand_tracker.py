@@ -31,6 +31,21 @@ class HandTrackingResult:
     handedness_confidence: float | None
 
 
+@dataclass(frozen=True)
+class MultiHandTrackingResult:
+    hands: list[HandTrackingResult]
+
+    @property
+    def first(self) -> HandTrackingResult | None:
+        return self.hands[0] if self.hands else None
+
+    def by_label(self, label: str) -> HandTrackingResult | None:
+        for h in self.hands:
+            if h.handedness_label == label:
+                return h
+        return None
+
+
 class HandTracker:
     THUMB_TIP = 4
     INDEX_TIP = 8
@@ -104,7 +119,7 @@ class HandTracker:
         self,
         frame_bgr: Any,
         frame_timestamp_ms: int | None = None,
-    ) -> HandTrackingResult:
+    ) -> MultiHandTrackingResult:
         try:
             import cv2
         except ImportError as exc:
@@ -171,37 +186,30 @@ class HandTracker:
     def register_callback(self, callback: Any) -> None:
         self._user_callback = callback
 
-    def _convert_result(self, result: Any) -> HandTrackingResult:
+    def _convert_result(self, result: Any) -> MultiHandTrackingResult:
         if not result or not getattr(result, "hand_landmarks", None):
-            return HandTrackingResult(
-                landmarks=[],
-                thumb_tip=None,
-                index_tip=None,
-                raw_landmarks=None,
-                world_landmarks=None,
-                handedness_label=None,
-                handedness_confidence=None,
-            )
+            return MultiHandTrackingResult(hands=[])
 
-        selected_index = 0
-        selected_raw_landmarks = result.hand_landmarks[selected_index]
-        label, confidence = self._handedness(result, selected_index)
-        landmarks = self._frame_points(selected_raw_landmarks)
+        hands = []
+        for i, raw_landmarks in enumerate(result.hand_landmarks):
+            label, confidence = self._handedness(result, i)
+            landmarks = self._frame_points(raw_landmarks)
 
-        world_landmarks = None
-        if hasattr(result, "hand_world_landmarks") and result.hand_world_landmarks:
-            world_raw = result.hand_world_landmarks[selected_index]
-            world_landmarks = self._point3_list(world_raw)
+            world_landmarks = None
+            if hasattr(result, "hand_world_landmarks") and i < len(result.hand_world_landmarks):
+                world_landmarks = self._point3_list(result.hand_world_landmarks[i])
 
-        return HandTrackingResult(
-            landmarks=landmarks,
-            thumb_tip=self._landmark_at(landmarks, self.THUMB_TIP),
-            index_tip=self._landmark_at(landmarks, self.INDEX_TIP),
-            raw_landmarks=selected_raw_landmarks,
-            world_landmarks=world_landmarks,
-            handedness_label=label,
-            handedness_confidence=confidence,
-        )
+            hands.append(HandTrackingResult(
+                landmarks=landmarks,
+                thumb_tip=self._landmark_at(landmarks, self.THUMB_TIP),
+                index_tip=self._landmark_at(landmarks, self.INDEX_TIP),
+                raw_landmarks=raw_landmarks,
+                world_landmarks=world_landmarks,
+                handedness_label=label,
+                handedness_confidence=confidence,
+            ))
+
+        return MultiHandTrackingResult(hands=hands)
 
     def close(self) -> None:
         landmarker = getattr(self, "_landmarker", None)
@@ -286,4 +294,4 @@ def _download_model(path: Path) -> None:
         ) from exc
 
 
-__all__ = ["HandTracker", "HandTrackingResult"]
+__all__ = ["HandTracker", "HandTrackingResult", "MultiHandTrackingResult"]

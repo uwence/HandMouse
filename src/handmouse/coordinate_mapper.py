@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from handmouse.hand_tracker import HandTrackingResult
+from handmouse.hand_tracker import HandTrackingResult, MultiHandTrackingResult
 from handmouse.types import FramePoint
 
 # Mutable debug metrics written by app._is_palm_facing_camera and read by
@@ -52,4 +52,14 @@ def unify_hand_result(raw_result: HandTrackingResult, input_is_mirrored: bool) -
         world_landmarks=getattr(raw_result, "world_landmarks", None),
         handedness_label=unified_label,
         handedness_confidence=raw_result.handedness_confidence,
+    )
+
+
+def unify_multi_hand_result(
+    multi: MultiHandTrackingResult,
+    input_is_mirrored: bool,
+) -> MultiHandTrackingResult:
+    """Unify a multi-hand tracking result by applying unify_hand_result to each hand."""
+    return MultiHandTrackingResult(
+        hands=[unify_hand_result(h, input_is_mirrored) for h in multi.hands]
     )

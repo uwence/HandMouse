@@ -4,7 +4,7 @@ from typing import Any
 from handmouse.config import (
     CameraConfig, ViewConfig, ControlRegion, PointerConfig,
     ShortcutConfig, ClutchConfig, GestureSwitches,
-    ExtendedGestureConfig, ExtendedGrabScrollConfig, PolicyConfig, AppConfig,
+    ExtendedGestureConfig, ExtendedGrabScrollConfig, PolicyConfig, BimanualConfig, AppConfig,
     SUPPORTED_BACKENDS
 )
 
@@ -102,6 +102,43 @@ def dict_to_app_config(d: dict) -> AppConfig:
         explicit_confirm_required=bool(policy_d.get("explicit_confirm_required", True)),
     )
 
+    bm_d = d.get("bimanual", {})
+    dominant_hand = str(bm_d.get("dominant_hand", "right"))
+    if dominant_hand not in ("left", "right"):
+        raise ValueError(f"bimanual.dominant_hand must be 'left' or 'right', got: {dominant_hand!r}")
+    open_hold_ms = int(bm_d.get("open_hold_ms", 250))
+    open_stable_frames = int(bm_d.get("open_stable_frames", 4))
+    suspend_grace_ms = int(bm_d.get("suspend_grace_ms", 150))
+    idle_grace_ms = int(bm_d.get("idle_grace_ms", 500))
+    identity_grace_ms = int(bm_d.get("identity_grace_ms", 500))
+    pointer_stable_frames = int(bm_d.get("pointer_stable_frames", 3))
+    handedness_min_score = float(bm_d.get("handedness_min_score", 0.75))
+    if open_hold_ms < 0:
+        raise ValueError(f"bimanual.open_hold_ms must be >= 0, got: {open_hold_ms}")
+    if open_stable_frames < 1:
+        raise ValueError(f"bimanual.open_stable_frames must be >= 1, got: {open_stable_frames}")
+    if suspend_grace_ms < 0:
+        raise ValueError(f"bimanual.suspend_grace_ms must be >= 0, got: {suspend_grace_ms}")
+    if idle_grace_ms < 0:
+        raise ValueError(f"bimanual.idle_grace_ms must be >= 0, got: {idle_grace_ms}")
+    if identity_grace_ms < 0:
+        raise ValueError(f"bimanual.identity_grace_ms must be >= 0, got: {identity_grace_ms}")
+    if pointer_stable_frames < 1:
+        raise ValueError(f"bimanual.pointer_stable_frames must be >= 1, got: {pointer_stable_frames}")
+    if not 0.0 <= handedness_min_score <= 1.0:
+        raise ValueError(f"bimanual.handedness_min_score must be in [0, 1], got: {handedness_min_score}")
+    bimanual = BimanualConfig(
+        enabled=bool(bm_d.get("enabled", False)),
+        dominant_hand=dominant_hand,
+        open_hold_ms=open_hold_ms,
+        open_stable_frames=open_stable_frames,
+        suspend_grace_ms=suspend_grace_ms,
+        idle_grace_ms=idle_grace_ms,
+        identity_grace_ms=identity_grace_ms,
+        pointer_stable_frames=pointer_stable_frames,
+        handedness_min_score=handedness_min_score,
+    )
+
     return AppConfig(
         camera=camera,
         pointer=pointer,
@@ -114,4 +151,5 @@ def dict_to_app_config(d: dict) -> AppConfig:
         grab_scroll_config=grab_scroll_config,
         view=view,
         show_osd=d.get("show_osd", True),
+        bimanual=bimanual,
     )

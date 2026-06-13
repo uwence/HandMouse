@@ -72,3 +72,60 @@ def test_config_schema_version_defaults_to_v2() -> None:
 def test_invalid_high_risk_cooldown_is_rejected() -> None:
     with pytest.raises(ValueError):
         dict_to_app_config({"policy": {"high_risk_cooldown_ms": -1}})
+
+
+def test_bimanual_config_defaults():
+    from handmouse.config import AppConfig, DEFAULT_CONFIG
+    assert hasattr(DEFAULT_CONFIG, "bimanual")
+    assert DEFAULT_CONFIG.bimanual.enabled is False
+    assert DEFAULT_CONFIG.bimanual.dominant_hand == "right"
+
+
+def test_bimanual_config_parses_from_dict():
+    from handmouse.config.schema import dict_to_app_config
+    d = {
+        "schema_version": 2,
+        "camera": {"width": 640, "height": 480, "index": 0},
+        "pointer": {"control_region": {"left": 0.1, "top": 0.1, "right": 0.9, "bottom": 0.9}},
+        "shortcut": {"min_distance": 0.18, "max_duration_ms": 900, "cooldown_ms": 700, "axis_ratio": 1.4},
+        "clutch": {"key_name": "ctrl_r"},
+        "bimanual": {
+            "enabled": True,
+            "dominant_hand": "left",
+            "open_hold_ms": 300,
+            "suspend_grace_ms": 200,
+            "idle_grace_ms": 600,
+        },
+    }
+    config = dict_to_app_config(d)
+    assert config.bimanual.enabled is True
+    assert config.bimanual.dominant_hand == "left"
+    assert config.bimanual.open_hold_ms == 300
+
+
+def test_bimanual_config_invalid_dominant_hand_raises():
+    from handmouse.config.schema import dict_to_app_config
+    d = {
+        "schema_version": 2,
+        "camera": {"width": 640, "height": 480, "index": 0},
+        "pointer": {"control_region": {"left": 0.1, "top": 0.1, "right": 0.9, "bottom": 0.9}},
+        "shortcut": {"min_distance": 0.18, "max_duration_ms": 900, "cooldown_ms": 700, "axis_ratio": 1.4},
+        "clutch": {"key_name": "ctrl_r"},
+        "bimanual": {"dominant_hand": "center"},
+    }
+    with pytest.raises(ValueError, match="dominant_hand"):
+        dict_to_app_config(d)
+
+
+def test_bimanual_config_negative_open_hold_ms_raises():
+    from handmouse.config.schema import dict_to_app_config
+    d = {
+        "schema_version": 2,
+        "camera": {"width": 640, "height": 480, "index": 0},
+        "pointer": {"control_region": {"left": 0.1, "top": 0.1, "right": 0.9, "bottom": 0.9}},
+        "shortcut": {"min_distance": 0.18, "max_duration_ms": 900, "cooldown_ms": 700, "axis_ratio": 1.4},
+        "clutch": {"key_name": "ctrl_r"},
+        "bimanual": {"open_hold_ms": -1},
+    }
+    with pytest.raises(ValueError, match="open_hold_ms"):
+        dict_to_app_config(d)

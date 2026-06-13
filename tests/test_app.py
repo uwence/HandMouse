@@ -51,13 +51,25 @@ class FakeCamera:
         return True, self.frames.pop(0)
 
 
+def _wrap_multi(hand_result: object) -> object:
+    """Wrap a single hand_result into the MultiHandTrackingResult shape expected by app.py.
+
+    app._run_loop reads `multi_result.first` and `coordinate_mapper.unify_multi_hand_result`
+    iterates `multi.hands`. Tests previously returned a single hand directly — we wrap
+    it here so the legacy fakes keep working with the bimanual-aware app.
+    """
+    if hand_result is None:
+        return SimpleNamespace(first=None, hands=[])
+    return SimpleNamespace(first=hand_result, hands=[hand_result])
+
+
 class FakeTracker:
     def __init__(self, results: list[object]) -> None:
         self.results = list(results)
 
     def process(self, frame: object, frame_timestamp_ms: int | None = None) -> object:
         assert self.results, "no tracker results left"
-        return self.results.pop(0)
+        return _wrap_multi(self.results.pop(0))
 
 
 class FakePointer:
@@ -279,7 +291,9 @@ class FakeBuffer:
 
 class FakeInferenceWorker:
     def __init__(self, item: tuple[object, object, int]) -> None:
-        self.buffer = FakeBuffer(item)
+        hand_result, frame, ts = item
+        wrapped = (_wrap_multi(hand_result), frame, ts)
+        self.buffer = FakeBuffer(wrapped)
 
 
 class FakeCameraReader:
@@ -1024,6 +1038,133 @@ def test_run_loop_unifies_threaded_result_once(
     )
 
     assert len(unify_calls) == 1
+
+
+# --- Bimanual safety tests ---------------------------------------------------
+
+def _bimanual_active_config(original):
+    """Clone ACTIVE_CONFIG with bimanual.enabled=True."""
+    from handmouse.config import BimanualConfig
+    return original.__class__(
+        camera=original.camera,
+        pointer=original.pointer,
+        shortcut=original.shortcut,
+        clutch=original.clutch,
+        schema_version=original.schema_version,
+        policy=original.policy,
+        gesture_switches=original.gesture_switches,
+        gesture_config=original.gesture_config,
+        grab_scroll_config=original.grab_scroll_config,
+        view=original.view,
+        show_osd=original.show_osd,
+        bimanual=BimanualConfig(enabled=True, dominant_hand="right"),
+    )
+
+
+class _FakeIdentityTracker:
+    """Returns both hands present with non-empty obs; bimanual branch will run."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def update(self, multi, now_ms, frame_age_ms):
+        from handmouse.tracking.identity import IdentifiedHands
+        from handmouse.tracking.observation import HandObservation, Point3
+        self.calls += 1
+        lm = [Point3(0.5, 0.5, 0.0)] * 21
+        obs = HandObservation(
+            frame_id=0, ts_ms=now_ms, image_landmarks=lm, world_landmarks=None,
+            handedness_label="Left", handedness_score=0.9,
+            raw_result=None, stale_ms=frame_age_ms, camera_space="mirrored",
+        )
+        ptr_obs = HandObservation(
+            frame_id=0, ts_ms=now_ms, image_landmarks=lm, world_landmarks=None,
+            handedness_label="Right", handedness_score=0.9,
+            raw_result=None, stale_ms=frame_age_ms, camera_space="mirrored",
+        )
+        ptr_result = SimpleNamespace(
+            landmarks=[FramePoint(0.5, 0.5)] * 21,
+            thumb_tip=FramePoint(0.5, 0.5),
+            index_tip=FramePoint(0.5, 0.5),
+            raw_landmarks=None, world_landmarks=None,
+            handedness_label="Right", handedness_confidence=0.9,
+        )
+        return IdentifiedHands(
+            left_result=None, right_result=ptr_result,
+            left_obs=obs, right_obs=ptr_obs,
+            left_stable_frames=10, right_stable_frames=10,
+            left_present=True, right_present=True,
+        )
+
+
+class _FakeBimanualGate:
+    """Always reports gate_active=True so safety gates upstream are the only thing stopping movement."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def update(self, mode_obs, pointer_obs, now_ms, pointer_stable=True):
+        from handmouse.bimanual_gate import BimanualGateResult, BimanualGateState
+        self.calls.append((mode_obs is not None, pointer_obs is not None, now_ms, pointer_stable))
+        return BimanualGateResult(
+            state=BimanualGateState.ACTIVE,
+            gate_active=True,
+            mode_is_secondary=False,
+        )
+
+
+def _make_bimanual_test_kwargs(monkeypatch, *, engagement_active: bool, quality_ok: bool):
+    """Build _run_loop kwargs that exercise the bimanual safety path."""
+    cv2 = FakeCv2(wait_keys=[0, ord("q")])
+    original = config_module.ACTIVE_CONFIG
+    monkeypatch.setattr(config_module, "ACTIVE_CONFIG", _bimanual_active_config(original))
+
+    frame = SimpleNamespace(shape=(480, 640, 3))
+    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=[])
+    quality = TrackingQuality(
+        ok=quality_ok, score=1.0 if quality_ok else 0.0, reasons=(),
+        palm_span_px=100.0, handedness_ok=True, stable_frames=10, lost_frames=0,
+    )
+    mouse = FakeMouse()
+    return mouse, dict(
+        cv2=cv2,
+        camera=FakeCamera(frames=[]),
+        tracker=FakeTracker([]),
+        pointer=FakePointer(updates=[ScreenDelta(5, 5)] * 4),  # would move if not gated
+        gesture=FakeGesture([[], [], [], []]),
+        grab_scroll=FakeGrabScroll([[], [], [], []]),
+        shortcut_detector=FakeShortcutDetector([[], [], [], []]),
+        engagement=FakeEngagement(
+            [make_engagement_result(active=engagement_active, state="ACTIVE" if engagement_active else "IDLE")]
+        ),
+        mouse=mouse,
+        shortcut=FakeShortcutController(),
+        debug_view=FakeDebugView(),
+        interlock=InteractionInterlock(),
+        camera_reader=FakeCameraReader(),
+        inference_worker=FakeInferenceWorker((hand_result, frame, 1000)),
+        quality_gate=FakeQualityGate(quality),
+        identity_tracker=_FakeIdentityTracker(),
+        bimanual_gate=_FakeBimanualGate(),
+    )
+
+
+def test_bimanual_does_not_move_pointer_when_engagement_inactive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bimanual gate_active=True but global is_active=False → no mouse.move_relative."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=False, quality_ok=True)
+    _run_loop(**kwargs)
+    assert mouse.moves == [], "bimanual must respect global is_active gate"
+
+
+def test_bimanual_does_not_move_pointer_when_quality_not_ok(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bimanual gate_active=True and is_active=True but quality.ok=False → no mouse.move_relative."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=False)
+    _run_loop(**kwargs)
+    assert mouse.moves == [], "bimanual must respect tracking quality gate"
 
 
 def test_build_frame_sample_schema_contains_world_z_and_quality() -> None:

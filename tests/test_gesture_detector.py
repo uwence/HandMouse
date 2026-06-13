@@ -154,8 +154,97 @@ def test_right_click_gesture() -> None:
     detector.update(obs_closed, now_ms=0)
     detector.update(obs_closed, now_ms=10)
     detector.update(obs_closed, now_ms=20)
-    
+
     detector.update(obs_open, now_ms=30)
     rel2 = detector.update(obs_open, now_ms=40)
 
     assert any(c.gesture == "click_right" for c in rel2)
+
+
+def test_bimanual_mode_emits_right_click_when_mode_is_secondary():
+    """In bimanual mode, left pinch + mode_is_secondary=True → click_right."""
+    from handmouse.gesture_detector import GestureConfig, GestureDetector
+    config = GestureConfig(
+        pinch_close_ratio=0.5,
+        pinch_open_ratio=0.7,
+        confirm_frames=1,
+        release_confirm_frames=1,
+        cooldown_ms=0,
+        bimanual_mode=True,
+    )
+    detector = GestureDetector(config)
+    obs_closed = make_obs(thumb_x=0.5, index_x=0.53)   # ratio ~0.3 < 0.5 → close
+    obs_open = make_obs(thumb_x=0.5, index_x=0.85)     # ratio > 0.7 → open
+
+    detector.update(obs_closed, now_ms=0)
+    candidates = detector.update(obs_open, now_ms=50, mode_is_secondary=True)
+    gestures = [c.gesture for c in candidates]
+    assert "click_right" in gestures
+    assert "click_left" not in gestures
+
+
+def test_bimanual_mode_emits_left_click_when_no_modifier():
+    """In bimanual mode, left pinch + mode_is_secondary=False → click_left."""
+    from handmouse.gesture_detector import GestureConfig, GestureDetector
+    config = GestureConfig(
+        pinch_close_ratio=0.5,
+        pinch_open_ratio=0.7,
+        confirm_frames=1,
+        release_confirm_frames=1,
+        cooldown_ms=0,
+        bimanual_mode=True,
+    )
+    detector = GestureDetector(config)
+    obs_closed = make_obs(thumb_x=0.5, index_x=0.53)
+    obs_open = make_obs(thumb_x=0.5, index_x=0.85)
+
+    detector.update(obs_closed, now_ms=0)
+    candidates = detector.update(obs_open, now_ms=50, mode_is_secondary=False)
+    gestures = [c.gesture for c in candidates]
+    assert "click_left" in gestures
+    assert "click_right" not in gestures
+
+
+def test_bimanual_right_click_modifier_beats_double_click_window():
+    """Within the 300ms double-click window, mode_is_secondary must still emit click_right."""
+    from handmouse.gesture_detector import GestureConfig, GestureDetector
+    config = GestureConfig(
+        pinch_close_ratio=0.5,
+        pinch_open_ratio=0.7,
+        confirm_frames=1,
+        release_confirm_frames=1,
+        cooldown_ms=0,
+        bimanual_mode=True,
+    )
+    detector = GestureDetector(config)
+    obs_closed = make_obs(thumb_x=0.5, index_x=0.53)
+    obs_open = make_obs(thumb_x=0.5, index_x=0.85)
+
+    # First click_left (no modifier)
+    detector.update(obs_closed, now_ms=0)
+    c1 = detector.update(obs_open, now_ms=20, mode_is_secondary=False)
+    assert any(c.gesture == "click_left" for c in c1)
+
+    # Second pinch within 300ms, this time with modifier → must be click_right, not double_click
+    detector.update(obs_closed, now_ms=100)
+    c2 = detector.update(obs_open, now_ms=120, mode_is_secondary=True)
+    gestures = [c.gesture for c in c2]
+    assert "click_right" in gestures
+    assert "double_click" not in gestures
+    assert "click_left" not in gestures
+
+
+def test_bimanual_mode_disables_thumb_middle_right_click():
+    """In bimanual mode, thumb-middle pinch never produces click_right."""
+    from handmouse.gesture_detector import GestureConfig, GestureDetector
+    config = GestureConfig(bimanual_mode=True, confirm_frames=2, release_confirm_frames=2)
+    detector = GestureDetector(config)
+    # thumb-middle pinch (right dist < threshold)
+    obs_closed = make_obs(thumb_x=0.5, middle_x=0.53, index_x=0.8)
+    obs_open = make_obs(thumb_x=0.5, middle_x=0.85, index_x=0.8)
+    detector.update(obs_closed, now_ms=0)
+    detector.update(obs_closed, now_ms=16)
+    candidates = detector.update(obs_open, now_ms=32)
+    candidates += detector.update(obs_open, now_ms=48)
+    gestures = [c.gesture for c in candidates]
+    assert "click_right" not in gestures
