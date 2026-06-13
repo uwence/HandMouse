@@ -96,8 +96,9 @@ class FakeGesture:
     def __init__(self, results: list[object]) -> None:
         self.results = list(results)
         self.calls: list[tuple[object, object, int]] = []
+        self.pointer_freeze_active = False
 
-    def update(self, obs, now_ms: int) -> object:
+    def update(self, obs, now_ms: int, mode_is_secondary: bool = False) -> object:
         self.calls.append((obs, now_ms))
         assert self.results, "no gesture results left"
         return self.results.pop(0)
@@ -1082,7 +1083,7 @@ class _FakeIdentityTracker:
             handedness_label="Right", handedness_score=0.9,
             raw_result=None, stale_ms=frame_age_ms, camera_space="mirrored",
         )
-        ptr_result = SimpleNamespace(
+        ptr_result = HandTrackingResult(
             landmarks=[FramePoint(0.5, 0.5)] * 21,
             thumb_tip=FramePoint(0.5, 0.5),
             index_tip=FramePoint(0.5, 0.5),
@@ -1165,6 +1166,27 @@ def test_bimanual_does_not_move_pointer_when_quality_not_ok(
     mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=False)
     _run_loop(**kwargs)
     assert mouse.moves == [], "bimanual must respect tracking quality gate"
+
+
+def test_bimanual_does_not_move_pointer_when_pinch_freeze_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """All gates pass and the pointer engine produced a nonzero delta, but the
+    gesture detector signals a pinch in progress → cursor must not move."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    kwargs["gesture"].pointer_freeze_active = True
+    _run_loop(**kwargs)
+    assert mouse.moves == [], "pinch-freeze must suppress cursor motion at click time"
+
+
+def test_bimanual_moves_pointer_when_not_frozen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Control for the freeze test: same setup, freeze off → cursor does move."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    kwargs["gesture"].pointer_freeze_active = False
+    _run_loop(**kwargs)
+    assert mouse.moves != [], "pointer must move when active, quality ok, and not frozen"
 
 
 def test_build_frame_sample_schema_contains_world_z_and_quality() -> None:

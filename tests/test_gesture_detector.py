@@ -234,6 +234,71 @@ def test_bimanual_right_click_modifier_beats_double_click_window():
     assert "click_left" not in gestures
 
 
+def test_pointer_not_frozen_when_hand_open() -> None:
+    """An open hand (ratio above freeze threshold) must not freeze the pointer."""
+    detector = make_detector()
+    detector.update(make_obs(thumb_x=0.5, index_x=0.8), now_ms=0)  # ratio 3.0
+    assert detector.pointer_freeze_active is False
+
+
+def test_pointer_freezes_on_pinch_intent_before_close() -> None:
+    """Freeze must engage as soon as thumb-index crosses the freeze ratio,
+    BEFORE the close threshold / any state change — this is what kills click drift."""
+    detector = make_detector()
+    # index_x=0.565 -> dist 0.065 -> ratio 0.65: below freeze(0.7) but above close(0.5)
+    detector.update(make_obs(thumb_x=0.5, index_x=0.565), now_ms=0)
+    assert detector._left_state == GestureState.PINCH_OPEN  # not yet a press
+    assert detector.pointer_freeze_active is True            # already frozen
+
+
+def test_pointer_stays_frozen_through_press_and_hold() -> None:
+    detector = make_detector()
+    closed = make_obs(thumb_x=0.5, index_x=0.53)  # ratio 0.3
+    detector.update(closed, now_ms=0)
+    detector.update(closed, now_ms=10)
+    detector.update(closed, now_ms=20)
+    assert detector._left_state == GestureState.PINCH_HOLD
+    assert detector.pointer_freeze_active is True
+
+
+def test_pointer_not_frozen_during_drag() -> None:
+    """While dragging, the cursor must follow the hand, so freeze must be off."""
+    detector = make_detector()
+    closed = make_obs(thumb_x=0.5, index_x=0.53)
+    moved_while_pinched = make_obs(thumb_x=0.68, index_x=0.71)
+    detector.update(closed, now_ms=0)
+    detector.update(closed, now_ms=10)
+    detector.update(closed, now_ms=20)
+    drag_start = detector.update(moved_while_pinched, now_ms=30)
+    assert any(c.gesture == "drag_hold" for c in drag_start)
+    assert detector.pointer_freeze_active is False
+
+
+def test_pinch_freeze_ratio_zero_disables_freeze() -> None:
+    config = GestureConfig(
+        pinch_close_ratio=0.5,
+        pinch_open_ratio=0.7,
+        confirm_frames=2,
+        release_confirm_frames=2,
+        cooldown_ms=100,
+        pinch_freeze_ratio=0.0,
+    )
+    detector = GestureDetector(config)
+    closed = make_obs(thumb_x=0.5, index_x=0.53)
+    detector.update(closed, now_ms=0)
+    detector.update(closed, now_ms=10)
+    assert detector._left_state == GestureState.PINCH_PRESSED
+    assert detector.pointer_freeze_active is False
+
+
+def test_reset_clears_pointer_freeze() -> None:
+    detector = make_detector()
+    detector.update(make_obs(thumb_x=0.5, index_x=0.53), now_ms=0)
+    assert detector.pointer_freeze_active is True
+    detector.reset()
+    assert detector.pointer_freeze_active is False
+
+
 def test_bimanual_mode_disables_thumb_middle_right_click():
     """In bimanual mode, thumb-middle pinch never produces click_right."""
     from handmouse.gesture_detector import GestureConfig, GestureDetector

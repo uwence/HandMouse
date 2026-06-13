@@ -575,7 +575,7 @@ def _run_loop(
                         else ptr_result_bm
                     )
                     delta = pointer.update(ptr_for_engine, now_ms)
-                    if delta is not None and (delta.dx != 0 or delta.dy != 0):
+                    if delta is not None and (delta.dx != 0 or delta.dy != 0) and not gesture.pointer_freeze_active:
                         mouse.move_relative(delta)
                         dx = delta.dx
                         dy = delta.dy
@@ -588,7 +588,7 @@ def _run_loop(
                     else hand_result
                 )
                 delta = pointer.update(pointer_hand_result, now_ms)
-                if delta is not None and (delta.dx != 0 or delta.dy != 0):
+                if delta is not None and (delta.dx != 0 or delta.dy != 0) and not gesture.pointer_freeze_active:
                     mouse.move_relative(delta)
                     dx = delta.dx
                     dy = delta.dy
