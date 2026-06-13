@@ -228,6 +228,46 @@ Hardening-related defaults now include:
 | FPS is below 30 | Check `Backend` line. If it says `CAP_ANY`, edit `config.py` to put `CAP_DSHOW` first. If FPS is still low at 640×480, your CPU is too slow for MediaPipe — there is no further v2 optimization to apply without switching hardware. |
 | Cursor jumps in big jumps when re-engaging | This is the pointer engine re-anchoring on the new index-tip position. Expected. Keep your hand in roughly the same position before and after pressing `m`. |
 
+## Experimental: Bimanual Mouse Mode
+
+Disabled by default. When enabled, HandMouse runs MediaPipe with `num_hands=2` and routes the two hands into distinct roles:
+
+- **Non-dominant (mode) hand** — open palm arms the gate; fist becomes a right-click modifier; absence suspends control.
+- **Dominant (pointer) hand** — drives cursor movement, left-click pinch, drag, and (with mode-hand fist) right-click.
+
+Gestures while bimanual mode is on:
+
+| Pose | Action |
+|---|---|
+| Left palm open + right hand stable in frame | Engage cursor movement |
+| Right pinch release | `click_left` |
+| Right pinch hold + move | `drag_hold` → `drag_release` |
+| Left fist + right pinch release | `click_right` (takes priority over the 300ms double-click window) |
+| Left hand lost > 150ms | Suspend (no movement, no clicks) |
+| Left hand lost > 500ms | Idle |
+
+To turn it on, add this to `~/.handmouse/config.yaml`:
+
+```yaml
+bimanual:
+  enabled: true
+  dominant_hand: right      # or "left" to swap roles
+  open_hold_ms: 250         # ms of palm open before ARMED
+  open_stable_frames: 4
+  suspend_grace_ms: 150     # mode-hand absence before SUSPEND
+  idle_grace_ms: 500        # mode-hand absence before IDLE
+  identity_grace_ms: 500    # how long to keep a hand identity through brief drops
+  pointer_stable_frames: 3  # frames pointer hand must be stable before ARMED→ACTIVE
+  handedness_min_score: 0.75
+```
+
+Toggling `enabled` requires restarting the app — the MediaPipe tracker is created once at start and its `num_hands` cannot change at runtime.
+
+Safety guarantees that still apply in bimanual mode:
+
+- OS mouse events only fire when global engagement is ACTIVE (`m` toggle / palm-hold), tracking quality is OK, the bimanual gate is ACTIVE, and the pointer hand was observed this frame (not cached).
+- `grab_scroll`, `alt_tab`, and quick-shortcut detectors are disabled in v1 — they consume the legacy single-hand observation, which is not the routed pointer hand. They will return in a later phase once they understand hand identity.
+
 ## Architecture
 
 ```

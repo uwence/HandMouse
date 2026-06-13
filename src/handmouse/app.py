@@ -82,7 +82,13 @@ def main() -> None:
             if running_mode_str == "live_stream"
             else vision.RunningMode.VIDEO
         )
-        tracker = HandTracker(running_mode=tracker_mode, num_hands=2)
+        # Only spin up two-hand inference when bimanual mode is actually enabled.
+        # Two-hand MediaPipe is heavier (lower FPS) and makes multi_result.first
+        # ambiguous when an idle second hand wanders into frame, so legacy
+        # single-hand mode must keep num_hands=1. Toggling bimanual.enabled at
+        # runtime requires an app restart to swap tracker shape.
+        num_hands = 2 if config.bimanual.enabled else 1
+        tracker = HandTracker(running_mode=tracker_mode, num_hands=num_hands)
 
         pointer = PointerEngine(
             PointerEngineConfig(
