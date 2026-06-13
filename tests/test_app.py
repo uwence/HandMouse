@@ -1222,6 +1222,37 @@ def test_bimanual_does_not_kill_active_on_non_palm_facing_first_hand(
     assert gesture.calls, "bimanual must not let a non-palm-facing multi.first hand disable gestures"
 
 
+class _FakePhysicalInputMonitor:
+    def __init__(self, recent: bool) -> None:
+        self._recent = recent
+        self.calls: list[tuple[int, int]] = []
+
+    def is_recent(self, now_ms: int, grace_ms: int) -> bool:
+        self.calls.append((now_ms, grace_ms))
+        return self._recent
+
+
+def test_physical_input_suspends_gesture_control(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When real mouse/keyboard input is recent, HandMouse must stand down: no
+    cursor movement even with all gates passing and a nonzero delta."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    kwargs["physical_input_monitor"] = _FakePhysicalInputMonitor(recent=True)
+    _run_loop(**kwargs)
+    assert mouse.moves == [], "recent physical input must suspend gesture control"
+
+
+def test_no_physical_input_does_not_suspend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Control: with no recent physical input, control runs normally."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    kwargs["physical_input_monitor"] = _FakePhysicalInputMonitor(recent=False)
+    _run_loop(**kwargs)
+    assert mouse.moves != [], "pointer must move when no physical input is suspending control"
+
+
 def test_build_frame_sample_schema_contains_world_z_and_quality() -> None:
     from handmouse.telemetry.schema import build_frame_sample
 

@@ -10,6 +10,7 @@ from typing import Any
 
 from handmouse.camera import Camera
 from handmouse.clutch_input import ClutchSnapshot, GlobalClutchInput
+from handmouse.physical_input_monitor import PhysicalInputMonitor
 from handmouse.config import DEFAULT_CONFIG, load_or_create_config
 from handmouse.debug_view import DebugTelemetry, DebugView
 from handmouse.engagement import EngagementConfig, EngagementFSM
@@ -58,6 +59,11 @@ SHOULD_EXIT = False
 # never stutters mid-motion; the freeze only engages while settling onto a target.
 AUTO_FREEZE_VELOCITY_MAX = 1.0
 
+# Suspend gesture control for this long after any *physical* mouse/keyboard input,
+# so a hand resting on the real mouse (visible to the webcam) does not fight the
+# user driving manually. HandMouse's own injected events are excluded.
+PHYSICAL_INPUT_GRACE_MS = 800
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=WINDOW_NAME)
     parser.add_argument("--record-telemetry", type=str, default=None, help="Path to dump frame telemetry JSONL")
@@ -77,6 +83,7 @@ def main() -> None:
     mouse = MouseController()
     shortcut = ShortcutController()
     clutch_input = GlobalClutchInput(config.clutch.key_name)
+    physical_input_monitor = PhysicalInputMonitor()
 
     try:
         camera.open()
@@ -152,6 +159,11 @@ def main() -> None:
             clutch_status = "FAILED"
             print(f"WARNING: Global clutch input listener failed to start: {exc}")
 
+        try:
+            physical_input_monitor.start()
+        except Exception as exc:
+            print(f"WARNING: Physical input monitor failed to start (manual-input suspend disabled): {exc}")
+
         camera_reader = CameraReader(camera)
         inference_worker = InferenceWorker(camera_reader, tracker)
         camera_reader.start()
@@ -182,6 +194,7 @@ def main() -> None:
                     debug_view=debug_view,
                     interlock=interlock,
                     clutch_input=clutch_input,
+                    physical_input_monitor=physical_input_monitor,
                     move_mode=move_mode,
                     clutch_status=clutch_status,
                     telemetry_file=None,
@@ -244,6 +257,7 @@ def main() -> None:
         mouse.set_control_enabled(False)
         shortcut.set_enabled(False)
         clutch_input.stop()
+        physical_input_monitor.stop()
         camera.release()
         if tracker is not None:
             tracker.close()
@@ -265,6 +279,7 @@ def _run_loop(
     debug_view: DebugView,
     interlock: InteractionInterlock,
     clutch_input: Any | None = None,
+    physical_input_monitor: Any | None = None,
     move_mode: Any | None = None,
     clutch_status: str | None = None,
     telemetry_file: Any | None = None,
@@ -469,6 +484,15 @@ def _run_loop(
             if not _is_palm_facing_camera(hand_result.landmarks, label):
                 # Treat sideways or back-facing hands as inactive for gestures and cursor movement
                 is_active = False
+
+        # Stand down while the user is driving with the physical mouse/keyboard, so a
+        # hand resting on the real mouse (seen by the webcam) cannot fight manual input.
+        if (
+            is_active
+            and physical_input_monitor is not None
+            and physical_input_monitor.is_recent(now_ms, PHYSICAL_INPUT_GRACE_MS)
+        ):
+            is_active = False
 
         mouse.set_control_enabled(is_active)
         shortcut.set_enabled(is_active)
