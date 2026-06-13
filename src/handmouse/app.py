@@ -460,7 +460,11 @@ def _run_loop(
             break
 
         is_active = engagement_result.is_active
-        if is_active and hand_result.landmarks:
+        # The per-frame palm-facing override runs on multi.first, which in bimanual
+        # mode may be the mode-hand fist (pointer lock) and would wrongly force
+        # is_active False — killing clicks while locked. In bimanual the BimanualGate
+        # (mode-hand palm-hold to arm) is the engagement authority, so skip it there.
+        if is_active and hand_result.landmarks and not conf.ACTIVE_CONFIG.bimanual.enabled:
             label = getattr(hand_result, "handedness_label", None)
             if not _is_palm_facing_camera(hand_result.landmarks, label):
                 # Treat sideways or back-facing hands as inactive for gestures and cursor movement

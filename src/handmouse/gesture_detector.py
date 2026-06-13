@@ -20,7 +20,7 @@ class GestureConfig:
     cooldown_ms: int = 150
     emit_on_release: bool = True
     bimanual_mode: bool = False
-    pinch_freeze_ratio: float = 0.7  # Freeze pointer when thumb-index ratio drops below this (pinch intent); stops click-time cursor drift. 0 disables.
+    pinch_freeze_ratio: float = 0.0  # Auto pinch-freeze (P0): freeze pointer when thumb-index ratio drops below this. 0 = disabled (default). The explicit left-fist pointer lock is the precision path; auto-freeze caused mid-move stutter, so it is off by default.
 
 
 class GestureState(Enum):

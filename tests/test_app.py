@@ -1204,6 +1204,24 @@ def test_bimanual_pointer_lock_freezes_cursor_but_allows_clicks(
     assert gesture.calls, "gesture detector must still run while locked so clicks work"
 
 
+def test_bimanual_does_not_kill_active_on_non_palm_facing_first_hand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: the per-frame palm-facing override runs on multi.first, which in
+    bimanual mode may be the mode-hand fist (pointer lock). It must NOT force
+    is_active False, or locking with a fist would kill all clicks."""
+    import handmouse.app as app
+    monkeypatch.setattr(app, "_is_palm_facing_camera", lambda landmarks, label: False)
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    # multi.first carries 21 landmarks so the palm-facing override is actually reached.
+    frame = SimpleNamespace(shape=(480, 640, 3))
+    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=[FramePoint(0.5, 0.5)] * 21)
+    kwargs["inference_worker"] = FakeInferenceWorker((hand_result, frame, 1000))
+    gesture = kwargs["gesture"]
+    _run_loop(**kwargs)
+    assert gesture.calls, "bimanual must not let a non-palm-facing multi.first hand disable gestures"
+
+
 def test_build_frame_sample_schema_contains_world_z_and_quality() -> None:
     from handmouse.telemetry.schema import build_frame_sample
 

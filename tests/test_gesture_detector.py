@@ -9,6 +9,7 @@ CONFIG = GestureConfig(
     confirm_frames=2,
     release_confirm_frames=2,
     cooldown_ms=100,
+    pinch_freeze_ratio=0.7,  # exercise the (off-by-default) auto pinch-freeze mechanism in these unit tests
 )
 
 def make_detector() -> GestureDetector:
