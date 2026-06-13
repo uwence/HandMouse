@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import replace
 import json
 import time
@@ -152,24 +153,36 @@ def main() -> None:
         from handmouse.osd import OSDManager
         osd = OSDManager(enabled=config.show_osd)
         
-        try:
-            clutch_input.start()
-            clutch_status = "OK"
-        except Exception as exc:
-            clutch_status = "FAILED"
-            print(f"WARNING: Global clutch input listener failed to start: {exc}")
+        # Diagnostic isolation toggles (env vars): disable always-on components one
+        # at a time to find what interferes with the physical mouse/keyboard.
+        #   HM_NO_CLUTCH=1   -> don't install the global right-Ctrl keyboard hook
+        #   HM_NO_MONITOR=1  -> don't install the physical-input low-level hooks
+        #   HM_NO_PREVIEW=1  -> don't show the OpenCV preview window (see render section)
+        if os.environ.get("HM_NO_CLUTCH"):
+            clutch_status = "DISABLED"
+        else:
+            try:
+                clutch_input.start()
+                clutch_status = "OK"
+            except Exception as exc:
+                clutch_status = "FAILED"
+                print(f"WARNING: Global clutch input listener failed to start: {exc}")
 
         manual_input_suspend_on = False
-        try:
-            physical_input_monitor.start()
-            manual_input_suspend_on = True
-        except Exception as exc:
-            print(f"WARNING: Physical input monitor failed to start (manual-input suspend disabled): {exc}")
+        if os.environ.get("HM_NO_MONITOR"):
+            pass
+        else:
+            try:
+                physical_input_monitor.start()
+                manual_input_suspend_on = True
+            except Exception as exc:
+                print(f"WARNING: Physical input monitor failed to start (manual-input suspend disabled): {exc}")
 
         print(
             f"[HandMouse] ready | manual-input-suspend="
             f"{'ON' if manual_input_suspend_on else 'OFF'} | bimanual={config.bimanual.enabled} "
-            f"| clutch={clutch_status} | num_hands={num_hands}"
+            f"| clutch={clutch_status} | num_hands={num_hands} "
+            f"| preview={'OFF' if os.environ.get('HM_NO_PREVIEW') else 'ON'}"
         )
 
         camera_reader = CameraReader(camera)
@@ -791,7 +804,8 @@ def _run_loop(
             telemetry,
         )
 
-        cv2.imshow(WINDOW_NAME, debug_frame)
+        if not os.environ.get("HM_NO_PREVIEW"):
+            cv2.imshow(WINDOW_NAME, debug_frame)
 
         try:
             from handmouse.telemetry.writer import log_event
