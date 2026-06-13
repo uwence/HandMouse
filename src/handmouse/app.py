@@ -191,7 +191,6 @@ def main() -> None:
         inference_worker.start()
 
         if args.record_telemetry:
-            import os
             from handmouse.telemetry.writer import TelemetryWriter
             import handmouse.telemetry.writer as tel_writer
             filepath = args.record_telemetry
