@@ -47,3 +47,20 @@ def _restore_active_config() -> None:
     saved = conf.ACTIVE_CONFIG
     yield
     conf.ACTIVE_CONFIG = saved
+
+
+@pytest.fixture(autouse=True)
+def _redirect_config_path(tmp_path, monkeypatch) -> None:
+    """``save_config``/``load_or_create_config`` fall back to the real user
+    config at ``~/.handmouse/config.yaml`` when called with no path. The
+    calibration wizard (``_apply_and_save``) and the settings GUI both save
+    with no path argument, so running the suite would OVERWRITE the developer's
+    real config. Both call the same ``handmouse.config`` function objects, which
+    read these module globals at call time, so redirecting them to a per-test
+    tmp dir keeps every no-path save off the real file. (``_restore_active_config``
+    only guards the in-memory global, not the on-disk file.)"""
+    import handmouse.config as conf
+    tmp_dir = tmp_path / ".handmouse"
+    monkeypatch.setattr(conf, "CONFIG_DIR", str(tmp_dir))
+    monkeypatch.setattr(conf, "CONFIG_PATH_YAML", str(tmp_dir / "config.yaml"))
+    monkeypatch.setattr(conf, "CONFIG_PATH_JSON", str(tmp_dir / "config.json"))
