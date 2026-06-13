@@ -297,6 +297,32 @@ class FakeInferenceWorker:
         self.buffer = FakeBuffer(wrapped)
 
 
+class FakeSequenceBuffer:
+    def __init__(self, items: list[tuple[object, object, int]]) -> None:
+        self.items = list(items)
+        self.current: tuple[object, object, int] | None = None
+
+    def wait_new_result(self, timeout: float) -> bool:
+        if not self.items:
+            return False
+        self.current = self.items.pop(0)
+        return True
+
+    def clear(self) -> None:
+        return None
+
+    def get(self) -> tuple[object, object, int]:
+        assert self.current is not None
+        return self.current
+
+
+class FakeSequenceInferenceWorker:
+    def __init__(self, items: list[tuple[object, object, int]]) -> None:
+        self.buffer = FakeSequenceBuffer(
+            [(_wrap_multi(hand_result), frame, ts) for hand_result, frame, ts in items]
+        )
+
+
 class FakeCameraReader:
     pass
 
@@ -1101,13 +1127,16 @@ class _FakeIdentityTracker:
 class _FakeBimanualGate:
     """Always reports gate_active=True so safety gates upstream are the only thing stopping movement."""
 
-    def __init__(self, pointer_frozen: bool = False) -> None:
+    def __init__(self, pointer_frozen: bool | list[bool] = False) -> None:
         self.calls: list[tuple] = []
-        self.pointer_frozen = pointer_frozen
+        self._frozen_sequence = list(pointer_frozen) if isinstance(pointer_frozen, list) else None
+        self.pointer_frozen = self._frozen_sequence[0] if self._frozen_sequence else bool(pointer_frozen)
 
     def update(self, mode_obs, pointer_obs, now_ms, pointer_stable=True):
         from handmouse.bimanual_gate import BimanualGateResult, BimanualGateState
         self.calls.append((mode_obs is not None, pointer_obs is not None, now_ms, pointer_stable))
+        if self._frozen_sequence:
+            self.pointer_frozen = self._frozen_sequence.pop(0)
         return BimanualGateResult(
             state=BimanualGateState.ACTIVE,
             gate_active=True,
@@ -1201,7 +1230,56 @@ def test_bimanual_pointer_lock_freezes_cursor_but_allows_clicks(
     gesture = kwargs["gesture"]
     _run_loop(**kwargs)
     assert mouse.moves == [], "left-fist pointer lock must freeze the cursor"
+    assert kwargs["pointer"].reset_calls == 1, "locked pointer frames must reset the pointer engine"
     assert gesture.calls, "gesture detector must still run while locked so clicks work"
+
+
+def test_bimanual_pointer_lock_dispatches_click_left(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Left-fist pointer lock freezes movement but must still route right-hand
+    thumb-index click candidates through policy/action dispatch."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    router = FakeActionRouter([[SimpleNamespace(action="click_left", executed=True)]])
+    kwargs["action_router"] = router
+    kwargs["bimanual_gate"] = _FakeBimanualGate(pointer_frozen=True)
+    kwargs["gesture"] = FakeGesture(
+        [[GestureCandidate("pinch", "click_left", "fire", 1.0, RiskClass.MEDIUM, True)]]
+    )
+    _run_loop(**kwargs)
+    assert mouse.moves == [], "left-fist pointer lock must freeze the cursor"
+    assert router.calls, "click candidate must reach action dispatch while pointer is locked"
+    assert [intent.action for intent in router.calls[0]] == ["click_left"]
+
+
+def test_bimanual_pointer_lock_to_open_palm_resets_before_moving(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fist -> open palm must reset the pointer engine during the locked frame so
+    movement resumes from a fresh pointer sample instead of a stale accumulated delta."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=True)
+    frame = SimpleNamespace(shape=(480, 640, 3))
+    hand_result = make_hand_result(index_tip=FramePoint(0.5, 0.5), landmarks=[])
+    pointer = FakePointer(updates=[ScreenDelta(7, 3)])
+    kwargs["cv2"] = FakeCv2(wait_keys=[0, 0, ord("q")])
+    kwargs["engagement"] = FakeEngagement(
+        [
+            make_engagement_result(active=True, state="ACTIVE"),
+            make_engagement_result(active=True, state="ACTIVE"),
+        ]
+    )
+    kwargs["inference_worker"] = FakeSequenceInferenceWorker(
+        [
+            (hand_result, frame, 1000),
+            (hand_result, frame, 1016),
+        ]
+    )
+    kwargs["pointer"] = pointer
+    kwargs["bimanual_gate"] = _FakeBimanualGate(pointer_frozen=[True, False])
+    _run_loop(**kwargs)
+    assert pointer.reset_calls == 1, "locked fist frame must clear pointer state"
+    assert len(pointer.update_calls) == 1, "pointer should update only after returning to open palm"
+    assert mouse.moves == [ScreenDelta(7, 3)]
 
 
 def test_bimanual_pointer_lock_allows_clicks_when_legacy_quality_is_bad(

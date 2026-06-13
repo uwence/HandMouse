@@ -256,9 +256,9 @@ def _build_settings_ui(root) -> None:
 
     bm_note = tk.Label(
         card_bm,
-        text="Mode hand (non-dominant) = gate + right-click modifier.\n"
-             "Pointer hand (dominant) = move + click + drag.\n"
-             "Toggling 'Enabled' requires an app restart.",
+        text="Mode hand: open palm = movement gate; fist = pointer lock.\n"
+             "Pointer hand: index = move; thumb-index = left click / drag.\n"
+             "Pointer hand: thumb-middle = right click. Enabled requires app restart.",
         bg=card_color, fg="#a6adc8", font=(font_family, 8), justify="left",
     )
     bm_note.pack(anchor="w", padx=10, pady=(0, 5))

@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from handmouse.physical_input_monitor import (
     LLKHF_INJECTED,
     LLMHF_INJECTED,
@@ -44,6 +46,36 @@ def test_mark_sets_recent() -> None:
     last = m.last_physical_input_ms
     assert last is not None
     assert m.is_recent(now_ms=last, grace_ms=800) is True
+
+
+def test_activation_key_does_not_mark_physical_input_by_default() -> None:
+    m = PhysicalInputMonitor()
+    assert m._handle_keyboard_event(None, SimpleNamespace(flags=0, vkCode=0x4D)) is True
+    assert m.last_physical_input_ms is None
+
+
+def test_right_ctrl_clutch_does_not_mark_physical_input_by_default() -> None:
+    m = PhysicalInputMonitor()
+    assert m._handle_keyboard_event(None, SimpleNamespace(flags=0, vkCode=0xA3)) is True
+    assert m.last_physical_input_ms is None
+
+
+def test_physical_mouse_input_marks_recent() -> None:
+    m = PhysicalInputMonitor()
+    assert m._handle_mouse_event(None, SimpleNamespace(flags=0)) is True
+    assert m.last_physical_input_ms is not None
+
+
+def test_injected_mouse_input_does_not_mark_recent() -> None:
+    m = PhysicalInputMonitor()
+    assert m._handle_mouse_event(None, SimpleNamespace(flags=LLMHF_INJECTED)) is True
+    assert m.last_physical_input_ms is None
+
+
+def test_keyboard_monitoring_can_be_enabled_explicitly() -> None:
+    m = PhysicalInputMonitor(monitor_keyboard=True)
+    assert m._handle_keyboard_event(None, SimpleNamespace(flags=0, vkCode=0x41)) is True
+    assert m.last_physical_input_ms is not None
 
 
 def test_stop_is_safe_when_never_started() -> None:

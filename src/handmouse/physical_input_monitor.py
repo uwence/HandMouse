@@ -20,8 +20,8 @@ def _is_injected(flags: Any, mask: int) -> bool:
 
 
 class PhysicalInputMonitor:
-    """Tracks the last time the user produced *physical* (non-injected) mouse or
-    keyboard input, so the app can stand down gesture control while the user is
+    """Tracks the last time the user produced *physical* (non-injected) mouse
+    input, so the app can stand down gesture control while the user is
     driving the machine manually (e.g. a hand resting on the mouse is in the
     webcam's view and would otherwise be tracked as gestures that fight the real
     cursor).
@@ -29,14 +29,18 @@ class PhysicalInputMonitor:
     Uses Windows low-level hooks via pynput and the INJECTED flag to ignore
     HandMouse's own synthetic events — otherwise HandMouse moving the cursor would
     look like "physical input" and suspend itself in a feedback loop.
+    Keyboard monitoring is opt-in because HandMouse's own physical control keys
+    (activation and clutch) must not suspend gesture control.
 
     Degrades to a no-op (never reports recent physical input) when pynput or its
     win32 backend is unavailable, so non-Windows / headless runs are unaffected.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, monitor_mouse: bool = True, monitor_keyboard: bool = False) -> None:
         self._last_ms: int | None = None
         self._lock = Lock()
+        self._monitor_mouse = monitor_mouse
+        self._monitor_keyboard = monitor_keyboard
         self._kbd_listener: Any | None = None
         self._mouse_listener: Any | None = None
 
@@ -44,21 +48,19 @@ class PhysicalInputMonitor:
         from pynput import keyboard, mouse
 
         def kbd_filter(msg: Any, data: Any) -> bool:
-            if not _is_injected(getattr(data, "flags", 0), LLKHF_INJECTED):
-                self._mark()
-            return True
+            return self._handle_keyboard_event(msg, data)
 
         def mouse_filter(msg: Any, data: Any) -> bool:
-            if not _is_injected(getattr(data, "flags", 0), LLMHF_INJECTED):
-                self._mark()
-            return True
+            return self._handle_mouse_event(msg, data)
 
-        self._kbd_listener = keyboard.Listener(win32_event_filter=kbd_filter)
-        self._mouse_listener = mouse.Listener(win32_event_filter=mouse_filter)
-        self._kbd_listener.daemon = True
-        self._mouse_listener.daemon = True
-        self._kbd_listener.start()
-        self._mouse_listener.start()
+        if self._monitor_keyboard:
+            self._kbd_listener = keyboard.Listener(win32_event_filter=kbd_filter)
+            self._kbd_listener.daemon = True
+            self._kbd_listener.start()
+        if self._monitor_mouse:
+            self._mouse_listener = mouse.Listener(win32_event_filter=mouse_filter)
+            self._mouse_listener.daemon = True
+            self._mouse_listener.start()
 
     def stop(self) -> None:
         for listener in (self._kbd_listener, self._mouse_listener):
@@ -69,6 +71,16 @@ class PhysicalInputMonitor:
                     pass
         self._kbd_listener = None
         self._mouse_listener = None
+
+    def _handle_keyboard_event(self, msg: Any, data: Any) -> bool:
+        if self._monitor_keyboard and not _is_injected(getattr(data, "flags", 0), LLKHF_INJECTED):
+            self._mark()
+        return True
+
+    def _handle_mouse_event(self, msg: Any, data: Any) -> bool:
+        if self._monitor_mouse and not _is_injected(getattr(data, "flags", 0), LLMHF_INJECTED):
+            self._mark()
+        return True
 
     def _mark(self) -> None:
         ms = int(time.perf_counter() * 1000)

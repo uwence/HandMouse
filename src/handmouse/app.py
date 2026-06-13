@@ -84,7 +84,7 @@ def main() -> None:
     mouse = MouseController()
     shortcut = ShortcutController()
     clutch_input = GlobalClutchInput(config.clutch.key_name)
-    physical_input_monitor = PhysicalInputMonitor()
+    physical_input_monitor = PhysicalInputMonitor(monitor_mouse=True, monitor_keyboard=False)
 
     try:
         camera.open()
