@@ -29,6 +29,32 @@ def _gate(open_hold_ms: int = 250) -> BimanualGate:
                         suspend_grace_ms=150, idle_grace_ms=500)
 
 
+def _palm_world(facing_camera: bool) -> list[Point3]:
+    world = [Point3(0.0, 0.0, 0.0)] * 21
+    if facing_camera:
+        # Palm in XY plane -> normal along Z (palm-facing).
+        world[5] = Point3(0.08, -0.02, 0.0)
+        world[17] = Point3(-0.05, -0.02, 0.0)
+    else:
+        # Palm in XZ plane -> normal along Y (sideways/edge-on).
+        world[5] = Point3(0.08, 0.0, 0.0)
+        world[17] = Point3(0.0, 0.0, 0.08)
+    return world
+
+
+def _with_world(obs: HandObservation, world: list[Point3] | None) -> HandObservation:
+    return HandObservation(
+        frame_id=obs.frame_id, ts_ms=obs.ts_ms, image_landmarks=obs.image_landmarks,
+        world_landmarks=world, handedness_label=obs.handedness_label,
+        handedness_score=obs.handedness_score, raw_result=obs.raw_result,
+        stale_ms=obs.stale_ms, camera_space=obs.camera_space,
+    )
+
+
+OPEN_WORLD_FACING = _with_world(OPEN, _palm_world(facing_camera=True))
+OPEN_WORLD_SIDEWAYS = _with_world(OPEN, _palm_world(facing_camera=False))
+
+
 def test_idle_with_no_hands():
     g = _gate()
     r = g.update(mode_obs=None, pointer_obs=None, now_ms=0)
@@ -118,6 +144,42 @@ def test_armed_stays_until_pointer_stable():
     assert r.gate_active is False
     # once stable, advance to ACTIVE
     r = g.update(mode_obs=OPEN, pointer_obs=OPEN, now_ms=32, pointer_stable=True)
+    assert r.state == BimanualGateState.ACTIVE
+    assert r.gate_active is True
+
+
+def test_missing_world_landmarks_preserves_existing_behavior():
+    # Same flow as test_armed_to_active_when_pointer_present but pinned to the
+    # explicit "world_landmarks is None" path.
+    g = _gate(open_hold_ms=0)
+    g.update(mode_obs=OPEN, pointer_obs=None, now_ms=0)
+    r = g.update(mode_obs=OPEN, pointer_obs=OPEN, now_ms=16)
+    assert r.state == BimanualGateState.ACTIVE
+    assert r.gate_active is True
+
+
+def test_sideways_palm_blocks_gate_active():
+    g = _gate(open_hold_ms=0)
+    g.update(mode_obs=OPEN_WORLD_SIDEWAYS, pointer_obs=None, now_ms=0)
+    r = g.update(mode_obs=OPEN_WORLD_SIDEWAYS, pointer_obs=OPEN, now_ms=16)
+    assert r.state == BimanualGateState.IDLE
+    assert r.gate_active is False
+
+
+def test_palm_facing_camera_allows_existing_open_palm_flow():
+    g = _gate(open_hold_ms=0)
+    g.update(mode_obs=OPEN_WORLD_FACING, pointer_obs=None, now_ms=0)
+    r = g.update(mode_obs=OPEN_WORLD_FACING, pointer_obs=OPEN, now_ms=16)
+    assert r.state == BimanualGateState.ACTIVE
+    assert r.gate_active is True
+
+
+def test_orientation_check_can_be_disabled():
+    g = BimanualGate(open_hold_ms=0, open_stable_frames=3,
+                     suspend_grace_ms=150, idle_grace_ms=500,
+                     palm_orientation_min_z=None)
+    g.update(mode_obs=OPEN_WORLD_SIDEWAYS, pointer_obs=None, now_ms=0)
+    r = g.update(mode_obs=OPEN_WORLD_SIDEWAYS, pointer_obs=OPEN, now_ms=16)
     assert r.state == BimanualGateState.ACTIVE
     assert r.gate_active is True
 

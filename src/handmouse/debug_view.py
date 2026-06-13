@@ -52,6 +52,9 @@ class DebugTelemetry:
     move_pose: bool | None = None
     dispatches: list[Any] | None = None
     candidates: list[Any] | None = None
+    world_landmarks_present: bool | None = None
+    palm_orientation_valid: bool | None = None
+    palm_normal_z: float | None = None
 
 
 class DebugView:
@@ -310,6 +313,21 @@ class DebugView:
                 disp = [d.action for d in telemetry.dispatches if d.executed]
                 lines.append(f"Dispatched: {disp}")
         
+        if telemetry is not None and telemetry.world_landmarks_present is not None:
+            world_present = "yes" if telemetry.world_landmarks_present else "no"
+            if telemetry.palm_orientation_valid is None:
+                ori_state = "n/a"
+            else:
+                ori_state = "yes" if telemetry.palm_orientation_valid else "no"
+            nz = (
+                f"{telemetry.palm_normal_z:+.2f}"
+                if telemetry.palm_normal_z is not None
+                else "n/a"
+            )
+            lines.append(
+                f"World3D: present={world_present} palm_ori_valid={ori_state} nz={nz}"
+            )
+
         lines.extend([
             f"FPS: {fps_value:.1f}",
             f"Frame age: {frame_age}",

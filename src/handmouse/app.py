@@ -784,6 +784,19 @@ def _run_loop(
                 break
             raise
 
+        from handmouse.tracking.palm_orientation import compute_palm_orientation as _cpo
+        ori_obs = mode_obs_bm if (bimanual_cfg.enabled and mode_obs_bm is not None) else obs
+        world_landmarks_present = (
+            ori_obs is not None and ori_obs.world_landmarks is not None
+        )
+        palm_orientation_valid: bool | None = None
+        palm_normal_z: float | None = None
+        if world_landmarks_present:
+            _ori = _cpo(ori_obs)
+            if _ori is not None:
+                palm_orientation_valid = _ori.is_valid
+                palm_normal_z = _ori.normal_z
+
         telemetry = DebugTelemetry(
             fps=fps,
             frame_age_ms=frame_age_ms,
@@ -796,6 +809,9 @@ def _run_loop(
             candidates=candidates,
             dispatches=dispatches,
             move_pose=move_mode_result.move_pose,
+            world_landmarks_present=world_landmarks_present,
+            palm_orientation_valid=palm_orientation_valid,
+            palm_normal_z=palm_normal_z,
         )
 
         debug_frame = debug_view.draw(

@@ -5,6 +5,10 @@ from enum import Enum, auto
 
 from handmouse.pose_detector import PoseDetector
 from handmouse.tracking.observation import HandObservation
+from handmouse.tracking.palm_orientation import (
+    DEFAULT_NORMAL_Z_MIN,
+    compute_palm_orientation,
+)
 
 
 class BimanualGateState(Enum):
@@ -28,11 +32,18 @@ class BimanualGate:
         open_stable_frames: int = 4,
         suspend_grace_ms: int = 150,
         idle_grace_ms: int = 500,
+        palm_orientation_min_z: float | None = DEFAULT_NORMAL_Z_MIN,
     ) -> None:
         self.open_hold_ms = open_hold_ms
         self.open_stable_frames = open_stable_frames
         self.suspend_grace_ms = suspend_grace_ms
         self.idle_grace_ms = idle_grace_ms
+        # When the mode hand has world_landmarks and palm orientation is
+        # clearly invalid (sideways), suppress mode-pose recognition so
+        # the gate cannot arm/activate. ``None`` disables the check; a
+        # mode hand without world_landmarks always preserves prior
+        # behavior.
+        self.palm_orientation_min_z = palm_orientation_min_z
 
         self._state = BimanualGateState.IDLE
         self._open_since_ms: int | None = None
@@ -49,6 +60,18 @@ class BimanualGate:
         mode_palm_open = mode_obs is not None and PoseDetector.is_palm_open(mode_obs)
         mode_fist = mode_obs is not None and PoseDetector.is_fist(mode_obs)
         mode_present = mode_obs is not None
+
+        if (
+            mode_obs is not None
+            and self.palm_orientation_min_z is not None
+            and mode_obs.world_landmarks is not None
+        ):
+            orientation = compute_palm_orientation(
+                mode_obs, normal_z_min=self.palm_orientation_min_z
+            )
+            if orientation is not None and not orientation.is_valid:
+                mode_palm_open = False
+                mode_fist = False
 
         if mode_present:
             self._mode_last_seen_ms = now_ms
