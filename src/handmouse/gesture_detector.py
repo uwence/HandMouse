@@ -146,11 +146,12 @@ class GestureDetector:
                                 GestureCandidate("pinch", "drag_release", "fire", 1.0, RiskClass.MEDIUM, True)
                             )
                         if self.config.emit_on_release and not was_dragging:
-                            if self._last_left_click_ms > 0 and now_ms - self._last_left_click_ms < 300:
-                                candidates.append(GestureCandidate("pinch", "double_click", "fire", 1.0, RiskClass.MEDIUM, True))
-                                self._last_left_click_ms = 0
-                            elif mode_is_secondary:
+                            # Right-click modifier takes precedence over the double-click window
+                            if mode_is_secondary:
                                 candidates.append(GestureCandidate("pinch", "click_right", "fire", 1.0, RiskClass.MEDIUM, True))
+                                self._last_left_click_ms = 0
+                            elif self._last_left_click_ms > 0 and now_ms - self._last_left_click_ms < 300:
+                                candidates.append(GestureCandidate("pinch", "double_click", "fire", 1.0, RiskClass.MEDIUM, True))
                                 self._last_left_click_ms = 0
                             else:
                                 candidates.append(GestureCandidate("pinch", "click_left", "fire", 1.0, RiskClass.MEDIUM, True))

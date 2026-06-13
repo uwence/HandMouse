@@ -121,7 +121,8 @@ def main() -> None:
         from handmouse.tracking.identity import HandIdentityTracker
         from handmouse.bimanual_gate import BimanualGate
         identity_tracker = HandIdentityTracker(
-            grace_ms=config.bimanual.identity_grace_ms
+            grace_ms=config.bimanual.identity_grace_ms,
+            min_confidence=config.bimanual.handedness_min_score,
         )
         bimanual_gate = BimanualGate(
             open_hold_ms=config.bimanual.open_hold_ms,
@@ -511,18 +512,32 @@ def _run_loop(
                 mode_obs_bm = identified.left_obs
                 ptr_obs_bm = identified.right_obs
                 ptr_result_bm = identified.right_result
+                ptr_stable_frames = identified.right_stable_frames
             else:
                 mode_obs_bm = identified.right_obs
                 ptr_obs_bm = identified.left_obs
                 ptr_result_bm = identified.left_result
-            gate_result = bimanual_gate.update(mode_obs_bm, ptr_obs_bm, now_ms)
+                ptr_stable_frames = identified.left_stable_frames
+            pointer_stable = ptr_stable_frames >= bimanual_cfg.pointer_stable_frames
+            gate_result = bimanual_gate.update(
+                mode_obs_bm, ptr_obs_bm, now_ms, pointer_stable=pointer_stable
+            )
 
         drag_runtime_active = bool(getattr(action_router, "_drag_active", False))
         effective_move_active = (is_active and move_mode_result.movement_enabled) or drag_runtime_active
 
+        bimanual_pointer_active = (
+            bimanual_cfg.enabled
+            and gate_result is not None
+            and gate_result.gate_active
+            and ptr_result_bm is not None
+            and is_active
+            and quality.ok
+        )
+
         try:
-            if bimanual_cfg.enabled and gate_result is not None:
-                if gate_result.gate_active and ptr_result_bm is not None:
+            if bimanual_cfg.enabled:
+                if bimanual_pointer_active:
                     ptr_for_engine = (
                         _mirror_hand_result_x(ptr_result_bm)
                         if getattr(config.view, "render_mirrored", False)
@@ -550,15 +565,16 @@ def _run_loop(
                 pointer.reset()
                 
             if is_active:
-                if alt_tab_detector is not None:
-                    if clutch_snapshot.clutch_down or move_mode_result.movement_enabled:
+                if bimanual_cfg.enabled:
+                    # v1 bimanual mode: only pointer move + left/right click + drag.
+                    # alt_tab, grab_scroll, shortcut detectors all consume the legacy
+                    # single-hand `obs` (multi.first) which is not the routed pointer hand,
+                    # so disable them entirely to avoid the mode hand triggering them.
+                    if alt_tab_detector is not None:
                         alt_tab_detector.reset()
-                    else:
-                        candidates.extend(alt_tab_detector.update(hand_result.landmarks, now_ms))
-
-                candidates.extend(grab_scroll.update(obs, now_ms))
-                if bimanual_cfg.enabled and gate_result is not None:
-                    if gate_result.gate_active and ptr_obs_bm is not None:
+                    grab_scroll.reset()
+                    shortcut_detector.reset()
+                    if gate_result is not None and gate_result.gate_active and ptr_obs_bm is not None and quality.ok:
                         candidates.extend(gesture.update(
                             ptr_obs_bm,
                             now_ms,
@@ -567,26 +583,33 @@ def _run_loop(
                     else:
                         gesture.reset()
                 else:
+                    if alt_tab_detector is not None:
+                        if clutch_snapshot.clutch_down or move_mode_result.movement_enabled:
+                            alt_tab_detector.reset()
+                        else:
+                            candidates.extend(alt_tab_detector.update(hand_result.landmarks, now_ms))
+
+                    candidates.extend(grab_scroll.update(obs, now_ms))
                     candidates.extend(gesture.update(obs, now_ms))
-                
-                shortcut_blocked_by_move = (
-                    clutch_snapshot.clutch_down
-                    or move_mode_result.movement_enabled
-                    or drag_runtime_active
-                )
-                if shortcut_blocked_by_move:
-                    shortcut_detector.reset()
-                else:
-                    shortcut_point = _palm_center_point(hand_result.landmarks) if hand_result else None
-                    candidates.extend(
-                        shortcut_detector.update(
-                            obs,
-                            now_ms,
-                            shortcut_point,
-                            palm_open=palm_visible,
-                            generic_pose_active=move_pose,
-                        )
+
+                    shortcut_blocked_by_move = (
+                        clutch_snapshot.clutch_down
+                        or move_mode_result.movement_enabled
+                        or drag_runtime_active
                     )
+                    if shortcut_blocked_by_move:
+                        shortcut_detector.reset()
+                    else:
+                        shortcut_point = _palm_center_point(hand_result.landmarks) if hand_result else None
+                        candidates.extend(
+                            shortcut_detector.update(
+                                obs,
+                                now_ms,
+                                shortcut_point,
+                                palm_open=palm_visible,
+                                generic_pose_active=move_pose,
+                            )
+                        )
             else:
                 if alt_tab_detector is not None:
                     alt_tab_detector.reset()

@@ -54,8 +54,9 @@ def _result_to_obs(
 
 
 class HandIdentityTracker:
-    def __init__(self, grace_ms: int = 500) -> None:
+    def __init__(self, grace_ms: int = 500, min_confidence: float = 0.75) -> None:
         self.grace_ms = grace_ms
+        self.min_confidence = min_confidence
         self._left: TrackedHand | None = None
         self._right: TrackedHand | None = None
 
@@ -67,9 +68,13 @@ class HandIdentityTracker:
     ) -> IdentifiedHands:
         seen: dict[str, tuple[HandTrackingResult, HandObservation]] = {}
         for h in multi.hands:
-            if h.handedness_label in ("Left", "Right") and h.landmarks:
-                obs = _result_to_obs(h, now_ms, frame_age_ms)
-                seen[h.handedness_label] = (h, obs)
+            if h.handedness_label not in ("Left", "Right") or not h.landmarks:
+                continue
+            score = h.handedness_confidence
+            if score is not None and score < self.min_confidence:
+                continue
+            obs = _result_to_obs(h, now_ms, frame_age_ms)
+            seen[h.handedness_label] = (h, obs)
 
         self._left = self._merge("Left", self._left, seen.get("Left"), now_ms)
         self._right = self._merge("Right", self._right, seen.get("Right"), now_ms)

@@ -99,3 +99,39 @@ def test_idle_to_armed_resets_when_mode_hand_closes():
     g.update(mode_obs=OPEN, pointer_obs=None, now_ms=0)    # ARMED
     r = g.update(mode_obs=FIST, pointer_obs=None, now_ms=16)
     assert r.state == BimanualGateState.IDLE
+
+
+def test_armed_stays_until_pointer_stable():
+    g = _gate(open_hold_ms=0)
+    g.update(mode_obs=OPEN, pointer_obs=None, now_ms=0)  # ARMED
+    # pointer present but not stable yet → still ARMED
+    r = g.update(mode_obs=OPEN, pointer_obs=OPEN, now_ms=16, pointer_stable=False)
+    assert r.state == BimanualGateState.ARMED
+    assert r.gate_active is False
+    # once stable, advance to ACTIVE
+    r = g.update(mode_obs=OPEN, pointer_obs=OPEN, now_ms=32, pointer_stable=True)
+    assert r.state == BimanualGateState.ACTIVE
+    assert r.gate_active is True
+
+
+def test_suspended_with_ambiguous_pose_goes_idle_not_active():
+    g = _gate(open_hold_ms=0)
+    g.update(mode_obs=OPEN, pointer_obs=OPEN, now_ms=0)
+    g.update(mode_obs=OPEN, pointer_obs=OPEN, now_ms=16)   # ACTIVE
+    g.update(mode_obs=None, pointer_obs=OPEN, now_ms=200)  # SUSPENDED
+    # Construct an obs that is_palm_open=False and is_fist=False (palm_facing_down, weird)
+    from handmouse.tracking.observation import Point3, HandObservation
+    lm = [Point3(0.5, 0.5, 0.0)] * 21
+    lm[0] = Point3(0.5, 0.5, 0.0)
+    for i in (5, 9, 13, 17):
+        lm[i] = Point3(0.5, 0.5, 0.0)  # MCP at palm center → mcp_d=0, _is_extended/_curled return False
+    for tip_i in (8, 12, 16, 20):
+        lm[tip_i] = Point3(0.5, 0.5, 0.0)
+    ambiguous = HandObservation(
+        frame_id=1, ts_ms=0, image_landmarks=lm, world_landmarks=None,
+        handedness_label="Left", handedness_score=0.9,
+        raw_result=None, stale_ms=0, camera_space="mirrored",
+    )
+    r = g.update(mode_obs=ambiguous, pointer_obs=OPEN, now_ms=216)
+    assert r.state == BimanualGateState.IDLE
+    assert r.gate_active is False

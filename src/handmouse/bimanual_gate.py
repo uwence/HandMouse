@@ -44,6 +44,7 @@ class BimanualGate:
         mode_obs: HandObservation | None,
         pointer_obs: HandObservation | None,
         now_ms: int,
+        pointer_stable: bool = True,
     ) -> BimanualGateResult:
         mode_palm_open = mode_obs is not None and PoseDetector.is_palm_open(mode_obs)
         mode_fist = mode_obs is not None and PoseDetector.is_fist(mode_obs)
@@ -55,11 +56,11 @@ class BimanualGate:
         if self._state == BimanualGateState.IDLE:
             self._state = self._update_idle(mode_palm_open, now_ms)
         elif self._state == BimanualGateState.ARMED:
-            self._state = self._update_armed(mode_palm_open, mode_present, pointer_obs, mode_fist)
+            self._state = self._update_armed(mode_palm_open, mode_present, pointer_obs, mode_fist, pointer_stable)
         elif self._state == BimanualGateState.ACTIVE:
             self._state = self._update_active(mode_present, mode_palm_open, mode_fist, now_ms)
         elif self._state == BimanualGateState.SUSPENDED:
-            self._state = self._update_suspended(mode_present, now_ms)
+            self._state = self._update_suspended(mode_present, mode_palm_open, mode_fist, now_ms)
 
         gate_active = self._state == BimanualGateState.ACTIVE
         mode_is_secondary = gate_active and mode_fist
@@ -100,13 +101,14 @@ class BimanualGate:
         mode_present: bool,
         pointer_obs: HandObservation | None,
         mode_fist: bool = False,
+        pointer_stable: bool = True,
     ) -> BimanualGateState:
         if not mode_present:
             return BimanualGateState.IDLE
         # In ARMED, only OPEN hand maintains or advances; FIST or other closes gate
         if not mode_palm_open:
             return BimanualGateState.IDLE
-        if pointer_obs is not None:
+        if pointer_obs is not None and pointer_stable:
             return BimanualGateState.ACTIVE
         return BimanualGateState.ARMED
 
@@ -129,9 +131,18 @@ class BimanualGate:
         # mode_present but neither open nor fist → IDLE
         return BimanualGateState.IDLE
 
-    def _update_suspended(self, mode_present: bool, now_ms: int) -> BimanualGateState:
+    def _update_suspended(
+        self,
+        mode_present: bool,
+        mode_palm_open: bool,
+        mode_fist: bool,
+        now_ms: int,
+    ) -> BimanualGateState:
         if mode_present:
-            return BimanualGateState.ACTIVE
+            # Only restore ACTIVE on a recognised gate pose; bare presence is not enough
+            if mode_palm_open or mode_fist:
+                return BimanualGateState.ACTIVE
+            return BimanualGateState.IDLE
         if self._mode_last_seen_ms is not None:
             lost_ms = now_ms - self._mode_last_seen_ms
             if lost_ms > self.idle_grace_ms:

@@ -85,6 +85,8 @@ class BimanualConfig:
     suspend_grace_ms: int = 150
     idle_grace_ms: int = 500
     identity_grace_ms: int = 500
+    pointer_stable_frames: int = 3
+    handedness_min_score: float = 0.75
 
 
 @dataclass(frozen=True)
