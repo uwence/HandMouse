@@ -1204,6 +1204,20 @@ def test_bimanual_pointer_lock_freezes_cursor_but_allows_clicks(
     assert gesture.calls, "gesture detector must still run while locked so clicks work"
 
 
+def test_bimanual_pointer_lock_allows_clicks_when_legacy_quality_is_bad(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: bimanual click routing must not depend on the legacy single-hand
+    quality gate, because that quality is computed from multi.first rather than
+    the routed pointer hand and can drop when the mode hand is a fist."""
+    mouse, kwargs = _make_bimanual_test_kwargs(monkeypatch, engagement_active=True, quality_ok=False)
+    kwargs["bimanual_gate"] = _FakeBimanualGate(pointer_frozen=True)
+    gesture = kwargs["gesture"]
+    _run_loop(**kwargs)
+    assert mouse.moves == [], "bad legacy quality must still keep the locked cursor frozen"
+    assert gesture.calls, "bad multi.first quality must not suppress routed bimanual clicks"
+
+
 def test_bimanual_does_not_kill_active_on_non_palm_facing_first_hand(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -627,6 +627,14 @@ def _run_loop(
             and is_active
             and quality.ok
         )
+        bimanual_gesture_active = (
+            bimanual_cfg.enabled
+            and gate_result is not None
+            and gate_result.gate_active
+            and ptr_obs_bm is not None
+            and ptr_present_now
+            and is_active
+        )
 
         try:
             if bimanual_cfg.enabled:
@@ -672,13 +680,11 @@ def _run_loop(
                         alt_tab_detector.reset()
                     grab_scroll.reset()
                     shortcut_detector.reset()
-                    if (
-                        gate_result is not None
-                        and gate_result.gate_active
-                        and ptr_obs_bm is not None
-                        and ptr_present_now
-                        and quality.ok
-                    ):
+                    # Do not gate routed bimanual clicks on `quality.ok`: that value
+                    # is derived from the legacy single-hand `obs` (often multi.first),
+                    # so a left-hand fist can drop quality and wrongly suppress
+                    # gesture.update() even while the routed pointer hand is present.
+                    if bimanual_gesture_active:
                         candidates.extend(gesture.update(ptr_obs_bm, now_ms))
                     else:
                         gesture.reset()
