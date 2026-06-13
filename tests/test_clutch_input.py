@@ -58,7 +58,9 @@ def test_global_clutch_input_updates_pressed_state(monkeypatch) -> None:
     assert listener.started is True
 
 
-def test_global_clutch_input_suppresses_only_right_ctrl(monkeypatch) -> None:
+def test_global_clutch_input_observes_without_suppressing(monkeypatch) -> None:
+    """The clutch key must be OBSERVED, never suppressed: suppressing right-Ctrl
+    ate it from combos like Right-Ctrl+C, leaving a bare 'c' in the foreground app."""
     listener_box: dict[str, object] = {}
 
     class FakeListener:
@@ -90,10 +92,16 @@ def test_global_clutch_input_suppresses_only_right_ctrl(monkeypatch) -> None:
 
     listener = listener_box["listener"]
     event_filter = listener.kwargs["win32_event_filter"]
-    event_filter(0, SimpleNamespace(vkCode=163))
-    event_filter(0, SimpleNamespace(vkCode=119))
-
-    assert listener.suppressed == 1
+    # WM_KEYDOWN (0x0100) for right-Ctrl -> tracked as pressed, NOT suppressed.
+    assert event_filter(0x0100, SimpleNamespace(vkCode=163)) is True
+    assert clutch.snapshot().clutch_down is True
+    # WM_KEYUP (0x0101) -> released.
+    event_filter(0x0101, SimpleNamespace(vkCode=163))
+    assert clutch.snapshot().clutch_down is False
+    # An unrelated key is ignored.
+    event_filter(0x0100, SimpleNamespace(vkCode=119))
+    # Crucially: the clutch never suppresses, so Right-Ctrl+C reaches the app intact.
+    assert listener.suppressed == 0
 
 
 def test_global_clutch_input_accepts_generic_ctrl_alias(monkeypatch) -> None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from threading import Lock
-from types import SimpleNamespace
 from typing import Any
 
 WM_KEYDOWN = 0x0100
@@ -61,10 +60,14 @@ class GlobalClutchInput:
                 with self._lock:
                     self._pressed = False
 
-        listener_ref: SimpleNamespace = SimpleNamespace(listener=None)
-
         def win32_event_filter(msg: Any, data: Any) -> bool:
-            listener = listener_ref.listener
+            # Observe-only: track the clutch key's pressed state but NEVER call
+            # suppress_event(). Suppressing the key ate it from combos like
+            # Right-Ctrl+C, so the OS received only "c" — a bare 'c' was typed and
+            # the copy/selection was lost while HandMouse ran. An observe-only
+            # low-level hook (like the physical-input monitor's) does not corrupt
+            # input; the cost is that holding the clutch key also reaches the
+            # foreground app, which is acceptable.
             vk_code = getattr(data, "vkCode", None)
             if vk_code == target_vk:
                 if msg in (WM_KEYDOWN, WM_SYSKEYDOWN):
@@ -73,12 +76,6 @@ class GlobalClutchInput:
                 elif msg in (WM_KEYUP, WM_SYSKEYUP):
                     with self._lock:
                         self._pressed = False
-            if (
-                listener is not None
-                and data is not None
-                and vk_code == target_vk
-            ):
-                listener.suppress_event()
             return True
 
         self._listener = keyboard.Listener(
@@ -86,7 +83,6 @@ class GlobalClutchInput:
             on_release=on_release,
             win32_event_filter=win32_event_filter,
         )
-        listener_ref.listener = self._listener
         self._listener.daemon = True
         self._listener.start()
 
