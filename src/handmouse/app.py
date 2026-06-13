@@ -159,10 +159,18 @@ def main() -> None:
             clutch_status = "FAILED"
             print(f"WARNING: Global clutch input listener failed to start: {exc}")
 
+        manual_input_suspend_on = False
         try:
             physical_input_monitor.start()
+            manual_input_suspend_on = True
         except Exception as exc:
             print(f"WARNING: Physical input monitor failed to start (manual-input suspend disabled): {exc}")
+
+        print(
+            f"[HandMouse] ready | manual-input-suspend="
+            f"{'ON' if manual_input_suspend_on else 'OFF'} | bimanual={config.bimanual.enabled} "
+            f"| clutch={clutch_status} | num_hands={num_hands}"
+        )
 
         camera_reader = CameraReader(camera)
         inference_worker = InferenceWorker(camera_reader, tracker)
@@ -305,6 +313,7 @@ def _run_loop(
     grab_release_cooldown_until = 0
     was_alt_tab_active = False
     was_grabbing = False
+    prev_manual_suspend = False
 
     last_applied_config = None
     last_active_state = None
@@ -487,12 +496,19 @@ def _run_loop(
 
         # Stand down while the user is driving with the physical mouse/keyboard, so a
         # hand resting on the real mouse (seen by the webcam) cannot fight manual input.
-        if (
-            is_active
-            and physical_input_monitor is not None
+        manual_suspend = (
+            physical_input_monitor is not None
             and physical_input_monitor.is_recent(now_ms, PHYSICAL_INPUT_GRACE_MS)
-        ):
+        )
+        if is_active and manual_suspend:
             is_active = False
+        if manual_suspend != prev_manual_suspend:
+            print(
+                "[HandMouse] physical input detected -> gesture control SUSPENDED"
+                if manual_suspend
+                else "[HandMouse] physical input idle -> gesture control resumed"
+            )
+            prev_manual_suspend = manual_suspend
 
         mouse.set_control_enabled(is_active)
         shortcut.set_enabled(is_active)

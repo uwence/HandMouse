@@ -39,12 +39,17 @@ def _reset_app_globals() -> None:
 
 @pytest.fixture(autouse=True)
 def _restore_active_config() -> None:
-    """Calibration/GUI save flows reassign the module-global
-    ``handmouse.config.ACTIVE_CONFIG``. Snapshot and restore it around every
-    test so a saved config (e.g. with different gesture/bimanual fields) can't
-    leak into unrelated tests under random ordering."""
+    """Tests must not depend on the developer's real ~/.handmouse/config.yaml,
+    which is loaded into the module-global ``ACTIVE_CONFIG`` at import time and
+    may have bimanual enabled, custom gesture switches, etc. (e.g. when the dev
+    is dogfooding bimanual mode, every legacy single-hand test would take the
+    bimanual branch and fail). Force a clean DEFAULT_CONFIG for every test and
+    restore the loaded global afterward. Tests that need a specific config
+    monkeypatch ACTIVE_CONFIG themselves; this also undoes any leak from
+    calibration/GUI save flows that reassign the global."""
     import handmouse.config as conf
     saved = conf.ACTIVE_CONFIG
+    conf.ACTIVE_CONFIG = conf.DEFAULT_CONFIG
     yield
     conf.ACTIVE_CONFIG = saved
 
